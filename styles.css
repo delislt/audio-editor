@@ -431,10 +431,10 @@ h1 {
     letter-spacing: 1.5px;
 }
 
-/* Controls Grid - Premium Cards Enhanced - FIXED TO MAINTAIN 3 COLUMNS */
+/* Controls Grid - FIXED: Force 3 columns in desktop */
 .controls-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
     gap: 22px;
     margin-bottom: 35px;
 }
