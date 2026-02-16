@@ -265,6 +265,11 @@ h1 {
     animation: fadeInUp 0.8s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* CRITICAL FIX: controls-grid must maintain grid display even when .active */
+.controls-grid.player-section.active {
+    display: grid;
+}
+
 @keyframes fadeInUp {
     from {
         opacity: 0;
