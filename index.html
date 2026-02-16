@@ -92,62 +92,6 @@
 
         <!-- Audio Controls -->
         <div class="controls-grid player-section">
-            <!-- Pre Gain -->
-        <div class="control-group">
-        <div class="control-header">
-            <span class="control-label">🎚️ Pre Gain (Headroom)</span>
-            <span class="control-value" id="preGainValue">-9 dB</span>
-        </div>
-        <input type="range" id="preGainSlider" min="-24" max="0" step="1" value="-9">
-        <div style="margin-top: 5px; font-size: 0.85em; color: #a0a0a0;">
-            Prevents clipping before effects
-        </div>
-    </div>
-
-    <!-- Output Gain -->
-    <div class="control-group">
-        <div class="control-header">
-            <span class="control-label">🔊 Output Gain</span>
-            <span class="control-value" id="outputGainValue">-1 dB</span>
-        </div>
-        <input type="range" id="outputGainSlider" min="-12" max="6" step="0.5" value="-1">
-        <div style="margin-top: 5px; font-size: 0.85em; color: #a0a0a0;">
-            Final output level control
-        </div>
-    </div>
-
-    <!-- Limiter Toggle -->
-    <div class="control-group">
-        <div class="control-header">
-            <span class="control-label">🛡️ Limiter (Anti-Clip)</span>
-            <div class="toggle active" id="limiterToggle">
-                <div class="toggle-slider"></div>
-            </div>
-        </div>
-        <div style="margin-top: 10px; font-size: 0.85em; color: #a0a0a0;">
-            <strong>Threshold:</strong> <span id="limiterThresholdValue">-6 dB</span><br>
-            <input type="range" id="limiterThresholdSlider" min="-12" max="-3" step="1" value="-6" style="width: 100%; margin-top: 5px;">
-        </div>
-    </div>
-
-    <!-- Level Meter -->
-    <div class="control-group">
-        <div class="control-header">
-            <span class="control-label">📊 Level Meter</span>
-            <span class="control-value" id="peakValue">-∞ dB</span>
-        </div>
-        <div class="meter-container">
-            <div class="meter-bar">
-                <div class="meter-fill" id="meterFill"></div>
-                <div class="meter-peak" id="meterPeak"></div>
-            </div>
-            <div class="clip-indicator" id="clipIndicator">CLIPPING!</div>
-        </div>
-        <div style="margin-top: 8px; font-size: 0.85em; color: #a0a0a0;">
-            RMS: <span id="rmsValue">-∞ dB</span>
-        </div>
-    </div>
-
             <!-- Playback Speed -->
             <div class="control-group">
                 <div class="control-header">
@@ -236,24 +180,24 @@
             </div>
 
             <!-- 3D Spatial Audio Toggle -->
-        <div class="control-group">
+            <div class="control-group">
                 <div class="control-header">
-            <span class="control-label">🎧 3D Spatial Audio</span>
-                <div class="toggle" id="spatialToggle">
-            <div class="toggle-slider"></div>
+                    <span class="control-label">🎧 3D Spatial Audio</span>
+                    <div class="toggle" id="spatialToggle">
+                        <div class="toggle-slider"></div>
+                    </div>
+                </div>
+                <div style="margin-top: 10px;">
+                    <label style="font-size: 0.9em; color: #a0a0a0;">Speed: </label>
+                    <input type="range" id="spatial3DSpeed" min="0.5" max="3" step="0.5" value="1" style="width: 70%;">
+                    <span class="control-value" id="spatial3DSpeedValue">1.0x</span>
+                </div>
+                <div style="margin-top: 5px; font-size: 0.85em; color: #a0a0a0;">
+                    Sound circles around you in 3D
+                </div>
             </div>
         </div>
-        <div style="margin-top: 10px;">
-        <label style="font-size: 0.9em; color: #a0a0a0;">Speed: </label>
-        <input type="range" id="spatial3DSpeed" min="0.5" max="3" step="0.5" value="1" style="width: 70%;">
-        <span class="control-value" id="spatial3DSpeedValue">1.0x</span>
     </div>
-    <div style="margin-top: 5px; font-size: 0.85em; color: #a0a0a0;">
-        Sound circles around you in 3D
-    </div>
-</div>
-</div>
-    </div>
-<script src="script.js"></script>
-    </body>
+    <script src="script.js"></script>
+</body>
 </html>
