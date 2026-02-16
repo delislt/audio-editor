@@ -31,6 +31,7 @@ let peakHold = 0;
 let peakHoldTime = 0;
 let spatial3DInterval;
 let spatial3DAngle = 0;
+let audioContextUnlocked = false;
 
 // DOM Elements
 const uploadSection = document.getElementById('uploadSection');
@@ -56,6 +57,55 @@ if (isIOS) {
     console.log('🍎 iOS device detected - applying iOS-specific audio handling');
 }
 
+// 🍎 iOS: Initialize AudioContext on ANY user interaction
+async function initAudioContext() {
+    if (audioContext && audioContextUnlocked) return true;
+    
+    try {
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            console.log('🎵 AudioContext created with state:', audioContext.state);
+        }
+        
+        if (audioContext.state === 'suspended') {
+            console.log('🍎 Attempting to resume AudioContext...');
+            await audioContext.resume();
+        }
+        
+        // 🍎 iOS: Play silent buffer to unlock audio
+        if (isIOS && !audioContextUnlocked) {
+            const buffer = audioContext.createBuffer(1, 1, 22050);
+            const source = audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioContext.destination);
+            source.start(0);
+            audioContextUnlocked = true;
+            console.log('✅ iOS: Audio context unlocked with silent buffer');
+        }
+        
+        console.log('✅ AudioContext ready, state:', audioContext.state);
+        return true;
+    } catch (error) {
+        console.error('❌ Failed to initialize AudioContext:', error);
+        return false;
+    }
+}
+
+// 🍎 iOS: Initialize audio on any user interaction
+if (isIOS) {
+    const unlockEvents = ['touchstart', 'touchend', 'click'];
+    const unlockAudio = () => {
+        if (!audioContextUnlocked) {
+            console.log('🍎 User interaction detected - unlocking audio...');
+            initAudioContext();
+        }
+    };
+    
+    unlockEvents.forEach(event => {
+        document.body.addEventListener(event, unlockAudio, { once: true });
+    });
+}
+
 // ✅ NOVA FUNÇÃO: Calcula duração ajustada baseada em speed e pitch
 function getAdjustedDuration() {
     if (!audioBuffer) return 0;
@@ -77,13 +127,16 @@ function updateTotalTimeDisplay() {
 
 // 🍎 iOS: Resume AudioContext if suspended
 async function resumeAudioContext() {
-    if (!audioContext) return;
+    if (!audioContext) {
+        const success = await initAudioContext();
+        if (!success) return false;
+    }
     
     if (audioContext.state === 'suspended') {
         console.log('🍎 iOS: Resuming suspended AudioContext...');
         try {
             await audioContext.resume();
-            console.log('✅ AudioContext resumed successfully');
+            console.log('✅ AudioContext resumed successfully, state:', audioContext.state);
         } catch (error) {
             console.error('❌ Failed to resume AudioContext:', error);
             alert('Failed to resume audio. Please try again.');
@@ -96,8 +149,12 @@ async function resumeAudioContext() {
 // Função auxiliar para parar SEM resetar posição
 function pauseWithoutReset() {
     if (sourceNode) {
-        sourceNode.stop();
-        sourceNode.disconnect();
+        try {
+            sourceNode.stop();
+            sourceNode.disconnect();
+        } catch (e) {
+            console.warn('Error stopping source:', e);
+        }
     }
     
     isPlaying = false;
@@ -114,9 +171,11 @@ uploadSection.addEventListener('click', () => {
     fileInput.click();
 });
 
-fileInput.addEventListener('change', (e) => {
+fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (file) {
+        // 🍎 Initialize audio context first
+        await initAudioContext();
         loadAudioFile(file);
     }
 });
@@ -130,11 +189,13 @@ uploadSection.addEventListener('dragleave', () => {
     uploadSection.classList.remove('drag-over');
 });
 
-uploadSection.addEventListener('drop', (e) => {
+uploadSection.addEventListener('drop', async (e) => {
     e.preventDefault();
     uploadSection.classList.remove('drag-over');
     const file = e.dataTransfer.files[0];
     if (file && file.type.startsWith('audio/')) {
+        // 🍎 Initialize audio context first
+        await initAudioContext();
         loadAudioFile(file);
     } else {
         alert('Please upload a valid audio file (MP3, WAV, OGG)');
@@ -150,15 +211,11 @@ async function loadAudioFile(file) {
     fileNameEl.textContent = currentFileName;
 
     try {
-        // 🍎 iOS: Create AudioContext on user interaction
-        if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            console.log('🎵 AudioContext created with state:', audioContext.state);
-            
-            // 🍎 iOS: Try to resume immediately after creation
-            if (isIOS && audioContext.state === 'suspended') {
-                await resumeAudioContext();
-            }
+        // 🍎 Ensure AudioContext is initialized
+        const success = await initAudioContext();
+        if (!success) {
+            alert('Failed to initialize audio system. Please try again.');
+            return;
         }
 
         const arrayBuffer = await file.arrayBuffer();
@@ -176,7 +233,7 @@ async function loadAudioFile(file) {
         
         // 🍎 iOS: Show helpful message
         if (isIOS) {
-            console.log('🍎 iOS: Ready to play - click Play button to start');
+            console.log('🍎 iOS: Audio ready - click Play to start');
         }
     } catch (error) {
         console.error('Error loading audio:', error);
@@ -298,9 +355,15 @@ async function play() {
         return;
     }
 
-    // 🍎 iOS: Resume AudioContext before playing
+    // 🍎 iOS: CRITICAL - Resume AudioContext before playing
+    console.log('🍎 Checking AudioContext state before play:', audioContext?.state);
     const resumed = await resumeAudioContext();
-    if (!resumed) return;
+    if (!resumed) {
+        alert('Failed to start audio. Please try again.');
+        return;
+    }
+    
+    console.log('🍎 AudioContext state after resume:', audioContext.state);
 
     sourceNode = audioContext.createBufferSource();
     sourceNode.buffer = audioBuffer;
@@ -310,6 +373,7 @@ async function play() {
     const offset = pauseTime;
     
     try {
+        console.log('🎵 Starting playback at offset:', offset);
         sourceNode.start(0, offset);
         startTime = audioContext.currentTime - offset;
         isPlaying = true;
@@ -329,7 +393,9 @@ async function play() {
         console.log('✅ Playback started successfully');
     } catch (error) {
         console.error('❌ Failed to start playback:', error);
-        alert('Failed to play audio. Please try again.');
+        alert('Failed to play audio. Error: ' + error.message + '\n\nPlease try uploading the file again.');
+        isPlaying = false;
+        playBtn.innerHTML = '▶️ Play';
     }
 }
 
@@ -337,7 +403,11 @@ function pause() {
     if (!isPlaying) return;
 
     pauseTime = audioContext.currentTime - startTime;
-    sourceNode.stop();
+    try {
+        sourceNode.stop();
+    } catch (e) {
+        console.warn('Error stopping source:', e);
+    }
     isPlaying = false;
     playBtn.innerHTML = '▶️ Play';
     
@@ -347,8 +417,12 @@ function pause() {
 
 function stop() {
     if (sourceNode) {
-        sourceNode.stop();
-        sourceNode.disconnect();
+        try {
+            sourceNode.stop();
+            sourceNode.disconnect();
+        } catch (e) {
+            console.warn('Error stopping source:', e);
+        }
     }
     
     isPlaying = false;
@@ -642,7 +716,11 @@ function startDragging(e) {
     wasPausedBeforeDrag = !isPlaying;
     
     if (isPlaying) {
-        sourceNode.stop();
+        try {
+            sourceNode.stop();
+        } catch (e) {
+            console.warn('Error stopping:', e);
+        }
         isPlaying = false;
     }
     
@@ -684,8 +762,12 @@ progressBar.addEventListener('click', (e) => {
     const wasPlaying = isPlaying;
 
     if (isPlaying && sourceNode) {
-        sourceNode.stop();
-        sourceNode.disconnect();
+        try {
+            sourceNode.stop();
+            sourceNode.disconnect();
+        } catch (e) {
+            console.warn('Error stopping:', e);
+        }
         isPlaying = false;
         cancelAnimationFrame(animationId);
         stopLevelMeter();
@@ -1512,4 +1594,4 @@ function toggleMute() {
     }
 }
 
-console.log('🎵 Real-Time Audio Editor v2.3 - iOS Safari support added 🍎✅');
+console.log('🎵 Real-Time Audio Editor v2.4 - Enhanced iOS Safari support 🍎✅');
