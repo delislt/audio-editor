@@ -198,6 +198,23 @@
             </div>
         </div>
     </div>
+    
+    <!-- Hidden elements for JavaScript compatibility -->
+    <div style="display: none;">
+        <input type="range" id="preGainSlider" value="-9">
+        <span id="preGainValue"></span>
+        <input type="range" id="outputGainSlider" value="-1">
+        <span id="outputGainValue"></span>
+        <div id="limiterToggle" class="toggle active"></div>
+        <input type="range" id="limiterThresholdSlider" value="-6">
+        <span id="limiterThresholdValue"></span>
+        <div id="meterFill"></div>
+        <div id="meterPeak"></div>
+        <span id="peakValue"></span>
+        <span id="rmsValue"></span>
+        <div id="clipIndicator"></div>
+    </div>
+    
     <script src="script.js"></script>
 </body>
 </html>
