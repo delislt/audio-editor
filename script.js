@@ -686,12 +686,12 @@ document.getElementById('limiterThresholdSlider').addEventListener('input', (e) 
     }
 });
 
-// ✅ CORRIGIDO: Atualiza o tempo total quando velocidade muda
+// ✅ ATUALIZADO: Mostra 2 casas decimais para maior precisão
 document.getElementById('speedSlider').addEventListener('input', (e) => {
     const value = parseFloat(e.target.value);
-    document.getElementById('speedValue').textContent = value.toFixed(1) + 'x';
+    document.getElementById('speedValue').textContent = value.toFixed(2) + 'x';
     
-    updateTotalTimeDisplay(); // ✅ ATUALIZA O TEMPO TOTAL
+    updateTotalTimeDisplay();
     
     if (isPlaying && sourceNode) {
         const pitchShift = parseFloat(document.getElementById('pitchSlider').value);
@@ -700,12 +700,12 @@ document.getElementById('speedSlider').addEventListener('input', (e) => {
     }
 });
 
-// ✅ CORRIGIDO: Atualiza o tempo total quando pitch muda
+// ✅ ATUALIZADO: Mostra 1 casa decimal para pitch
 document.getElementById('pitchSlider').addEventListener('input', (e) => {
-    const value = parseInt(e.target.value);
-    document.getElementById('pitchValue').textContent = value + ' semitones';
+    const value = parseFloat(e.target.value);
+    document.getElementById('pitchValue').textContent = value.toFixed(1) + ' semitones';
     
-    updateTotalTimeDisplay(); // ✅ ATUALIZA O TEMPO TOTAL
+    updateTotalTimeDisplay();
     
     if (isPlaying && sourceNode) {
         const speedControl = parseFloat(document.getElementById('speedSlider').value);
@@ -714,21 +714,22 @@ document.getElementById('pitchSlider').addEventListener('input', (e) => {
     }
 });
 
+// ✅ ATUALIZADO: Mostra 1 casa decimal para volume
 document.getElementById('volumeSlider').addEventListener('input', (e) => {
-    const value = parseInt(e.target.value);
-    document.getElementById('volumeValue').textContent = value + '%';
+    const value = parseFloat(e.target.value);
+    document.getElementById('volumeValue').textContent = value.toFixed(1) + '%';
     if (gainNode) {
         gainNode.gain.value = value / 100;
     }
 });
 
+// ✅ ATUALIZADO: Mostra 1 casa decimal para bass
 document.getElementById('bassSlider').addEventListener('input', (e) => {
-    const value = parseInt(e.target.value);
-    document.getElementById('bassValue').textContent = value + ' dB';
+    const value = parseFloat(e.target.value);
+    document.getElementById('bassValue').textContent = value.toFixed(1) + ' dB';
     
     if (bassFilter) {
-        const safeBass = Math.min(value, 15);
-        bassFilter.gain.value = safeBass;
+        bassFilter.gain.value = Math.min(value, 15);
         
         if (value > 10) {
             const compensation = -Math.min(6, (value - 10) * 0.5);
@@ -742,19 +743,22 @@ document.getElementById('bassSlider').addEventListener('input', (e) => {
     }
 });
 
+// ✅ ATUALIZADO: Mostra 1 casa decimal para treble
 document.getElementById('trebleSlider').addEventListener('input', (e) => {
-    const value = parseInt(e.target.value);
-    document.getElementById('trebleValue').textContent = value + ' dB';
+    const value = parseFloat(e.target.value);
+    document.getElementById('trebleValue').textContent = value.toFixed(1) + ' dB';
     if (trebleFilter) {
         trebleFilter.gain.value = value;
     }
 });
 
+// ✅ ATUALIZADO: Mostra 1 casa decimal para pan
 document.getElementById('panSlider').addEventListener('input', (e) => {
-    const value = parseInt(e.target.value);
+    const value = parseFloat(e.target.value);
+    const absValue = Math.abs(value).toFixed(1);
     const panText = value === 0 ? 'Center' : 
-                   value < 0 ? Math.abs(value) + '% Left' : 
-                   value + '% Right';
+                   value < 0 ? absValue + '% Left' : 
+                   absValue + '% Right';
     document.getElementById('panValue').textContent = panText;
     
     if (panNode && !spatialEnabled && !eightDEnabled) {
@@ -762,9 +766,10 @@ document.getElementById('panSlider').addEventListener('input', (e) => {
     }
 });
 
+// ✅ ATUALIZADO: Mostra 1 casa decimal para reverb
 document.getElementById('reverbSlider').addEventListener('input', (e) => {
-    const value = parseInt(e.target.value);
-    document.getElementById('reverbValue').textContent = value + '%';
+    const value = parseFloat(e.target.value);
+    document.getElementById('reverbValue').textContent = value.toFixed(1) + '%';
     
     const wetLevel = value / 100;
     const dryLevel = 1 - wetLevel;
@@ -775,14 +780,16 @@ document.getElementById('reverbSlider').addEventListener('input', (e) => {
     createReverbImpulse(2, value / 20);
 });
 
+// ✅ ATUALIZADO: Mostra 1 casa decimal para echo
 document.getElementById('echoSlider').addEventListener('input', (e) => {
-    const value = parseInt(e.target.value);
-    document.getElementById('echoValue').textContent = value + '%';
+    const value = parseFloat(e.target.value);
+    document.getElementById('echoValue').textContent = value.toFixed(1) + '%';
     if (delayGain) {
         delayGain.gain.value = Math.min(0.6, value / 100 * 0.5);
     }
 });
 
+// ✅ ATUALIZADO: Mostra 1 casa decimal
 document.getElementById('spatial3DSpeed').addEventListener('input', (e) => {
     const value = parseFloat(e.target.value);
     document.getElementById('spatial3DSpeedValue').textContent = value.toFixed(1) + 'x';
@@ -805,6 +812,7 @@ eightDToggle.addEventListener('click', () => {
     }
 });
 
+// ✅ ATUALIZADO: Mostra 1 casa decimal
 document.getElementById('eightDSpeed').addEventListener('input', (e) => {
     const value = parseFloat(e.target.value);
     document.getElementById('eightDSpeedValue').textContent = value.toFixed(1);
@@ -903,7 +911,7 @@ function stop8DAudio() {
         eightDAudioInterval = null;
     }
     if (panNode) {
-        panNode.pan.value = parseInt(document.getElementById('panSlider').value) / 100;
+        panNode.pan.value = parseFloat(document.getElementById('panSlider').value) / 100;
     }
 }
 
@@ -953,28 +961,28 @@ document.querySelectorAll('.preset-btn').forEach(btn => {
 
 function applyPreset(preset) {
     document.getElementById('speedSlider').value = preset.speed;
-    document.getElementById('speedValue').textContent = preset.speed.toFixed(1) + 'x';
+    document.getElementById('speedValue').textContent = preset.speed.toFixed(2) + 'x';
 
     document.getElementById('pitchSlider').value = preset.pitch;
-    document.getElementById('pitchValue').textContent = preset.pitch + ' semitones';
+    document.getElementById('pitchValue').textContent = preset.pitch.toFixed(1) + ' semitones';
 
     document.getElementById('volumeSlider').value = preset.volume;
-    document.getElementById('volumeValue').textContent = preset.volume + '%';
+    document.getElementById('volumeValue').textContent = preset.volume.toFixed(1) + '%';
 
     document.getElementById('bassSlider').value = preset.bass;
-    document.getElementById('bassValue').textContent = preset.bass + ' dB';
+    document.getElementById('bassValue').textContent = preset.bass.toFixed(1) + ' dB';
 
     document.getElementById('trebleSlider').value = preset.treble;
-    document.getElementById('trebleValue').textContent = preset.treble + ' dB';
+    document.getElementById('trebleValue').textContent = preset.treble.toFixed(1) + ' dB';
 
     document.getElementById('panSlider').value = preset.pan;
     document.getElementById('panValue').textContent = 'Center';
 
     document.getElementById('reverbSlider').value = preset.reverb;
-    document.getElementById('reverbValue').textContent = preset.reverb + '%';
+    document.getElementById('reverbValue').textContent = preset.reverb.toFixed(1) + '%';
 
     document.getElementById('echoSlider').value = preset.echo;
-    document.getElementById('echoValue').textContent = preset.echo + '%';
+    document.getElementById('echoValue').textContent = preset.echo.toFixed(1) + '%';
 
     document.getElementById('preGainSlider').value = preset.preGain;
     document.getElementById('preGainValue').textContent = preset.preGain.toFixed(1) + ' dB';
@@ -1008,7 +1016,7 @@ function applyPreset(preset) {
         spatialToggle.click();
     }
     
-    updateTotalTimeDisplay(); // ✅ ATUALIZA O TEMPO TOTAL
+    updateTotalTimeDisplay();
 
     if (isPlaying) {
         const currentPos = audioContext.currentTime - startTime;
@@ -1067,18 +1075,18 @@ downloadBtn.addEventListener('click', async () => {
         const offlineBass = offlineContext.createBiquadFilter();
         offlineBass.type = 'lowshelf';
         offlineBass.frequency.value = 200;
-        offlineBass.gain.value = parseInt(document.getElementById('bassSlider').value);
+        offlineBass.gain.value = parseFloat(document.getElementById('bassSlider').value);
 
         const offlineTreble = offlineContext.createBiquadFilter();
         offlineTreble.type = 'highshelf';
         offlineTreble.frequency.value = 3000;
-        offlineTreble.gain.value = parseInt(document.getElementById('trebleSlider').value);
+        offlineTreble.gain.value = parseFloat(document.getElementById('trebleSlider').value);
 
         let offlinePan = null;
         if (!spatialEnabled && !eightDEnabled) {
             offlinePan = offlineContext.createStereoPanner ? offlineContext.createStereoPanner() : null;
             if (offlinePan) {
-                offlinePan.pan.value = parseInt(document.getElementById('panSlider').value) / 100;
+                offlinePan.pan.value = parseFloat(document.getElementById('panSlider').value) / 100;
             }
         }
 
@@ -1088,7 +1096,7 @@ downloadBtn.addEventListener('click', async () => {
         const offlineDelay = offlineContext.createDelay(5.0);
         offlineDelay.delayTime.value = 0.3;
         const offlineDelayGain = offlineContext.createGain();
-        const echoValue = parseInt(document.getElementById('echoSlider').value);
+        const echoValue = parseFloat(document.getElementById('echoSlider').value);
         offlineDelayGain.gain.value = Math.min(0.6, echoValue / 100 * 0.5);
 
         const offlineConvolver = offlineContext.createConvolver();
@@ -1219,9 +1227,9 @@ downloadBtn.addEventListener('click', async () => {
         const effects = [];
         if (speed !== 1.0) effects.push(`${speed}x`);
         if (pitchShift !== 0) effects.push(`${pitchShift > 0 ? '+' : ''}${pitchShift}st`);
-        if (parseInt(document.getElementById('bassSlider').value) > 0) effects.push('bass');
-        if (parseInt(document.getElementById('reverbSlider').value) > 0) effects.push('reverb');
-        if (parseInt(document.getElementById('echoSlider').value) > 0) effects.push('echo');
+        if (parseFloat(document.getElementById('bassSlider').value) > 0) effects.push('bass');
+        if (parseFloat(document.getElementById('reverbSlider').value) > 0) effects.push('reverb');
+        if (parseFloat(document.getElementById('echoSlider').value) > 0) effects.push('echo');
         
         const effectsSuffix = effects.length > 0 ? '_' + effects.join('_') : '';
         a.download = 'edited_' + currentFileName.replace(/\.[^/.]+$/, '') + effectsSuffix + '.wav';
@@ -1429,11 +1437,11 @@ let isMuted = false;
 
 function changeVolume(delta) {
     const volumeSlider = document.getElementById('volumeSlider');
-    const currentVolume = parseInt(volumeSlider.value);
+    const currentVolume = parseFloat(volumeSlider.value);
     const newVolume = Math.max(0, Math.min(150, currentVolume + delta));
     
     volumeSlider.value = newVolume;
-    document.getElementById('volumeValue').textContent = newVolume + '%';
+    document.getElementById('volumeValue').textContent = newVolume.toFixed(1) + '%';
     if (gainNode) gainNode.gain.value = newVolume / 100;
 }
 
@@ -1442,11 +1450,11 @@ function toggleMute() {
     
     if (isMuted) {
         volumeSlider.value = previousVolume;
-        document.getElementById('volumeValue').textContent = previousVolume + '%';
+        document.getElementById('volumeValue').textContent = previousVolume.toFixed(1) + '%';
         if (gainNode) gainNode.gain.value = previousVolume / 100;
         isMuted = false;
     } else {
-        previousVolume = parseInt(volumeSlider.value);
+        previousVolume = parseFloat(volumeSlider.value);
         volumeSlider.value = 0;
         document.getElementById('volumeValue').textContent = '0% (Muted)';
         if (gainNode) gainNode.gain.value = 0;
@@ -1454,4 +1462,4 @@ function toggleMute() {
     }
 }
 
-console.log('🎵 Real-Time Audio Editor v2.1 - Com duração ajustada por velocidade ✅');
+console.log('🎵 Real-Time Audio Editor v2.2 - Precisão aprimorada nos controles ✅');
