@@ -48,6 +48,25 @@ const fileNameEl = document.getElementById('fileName');
 const waveformCanvas = document.getElementById('waveform');
 const waveformCtx = waveformCanvas.getContext('2d');
 
+// ✅ NOVA FUNÇÃO: Calcula duração ajustada baseada em speed e pitch
+function getAdjustedDuration() {
+    if (!audioBuffer) return 0;
+    
+    const pitchShift = parseFloat(document.getElementById('pitchSlider').value);
+    const speed = parseFloat(document.getElementById('speedSlider').value);
+    const pitchRatio = Math.pow(2, pitchShift / 12);
+    const finalPlaybackRate = speed * pitchRatio;
+    
+    return audioBuffer.duration / finalPlaybackRate;
+}
+
+// ✅ NOVA FUNÇÃO: Atualiza o display do tempo total
+function updateTotalTimeDisplay() {
+    if (!audioBuffer) return;
+    const adjustedDuration = getAdjustedDuration();
+    totalTimeEl.textContent = formatTime(adjustedDuration);
+}
+
 // Função auxiliar para parar SEM resetar posição
 function pauseWithoutReset() {
     if (sourceNode) {
@@ -59,10 +78,7 @@ function pauseWithoutReset() {
     playBtn.innerHTML = '▶️ Play';
     cancelAnimationFrame(animationId);
     stopLevelMeter();
-    
-    // ⚠️ NÃO reseta pauseTime nem startTime
 }
-
 
 // ====================================
 // FILE UPLOAD HANDLING
@@ -121,7 +137,7 @@ async function loadAudioFile(file) {
 
         initializeAudioNodes();
         drawWaveform();
-        totalTimeEl.textContent = formatTime(audioBuffer.duration);
+        updateTotalTimeDisplay(); // ✅ USA A NOVA FUNÇÃO
 
         console.log('✅ Audio loaded successfully');
     } catch (error) {
@@ -135,32 +151,26 @@ async function loadAudioFile(file) {
 // ====================================
 
 function initializeAudioNodes() {
-    // PRE-GAIN: Headroom to prevent clipping (-9 dB default)
     preGainNode = audioContext.createGain();
     preGainNode.gain.value = dbToGain(-9);
 
-    // MAIN GAIN: User volume control
     gainNode = audioContext.createGain();
     gainNode.gain.value = 1.0;
 
-    // BASS FILTER: Conservative low-shelf
     bassFilter = audioContext.createBiquadFilter();
     bassFilter.type = 'lowshelf';
     bassFilter.frequency.value = 200;
     bassFilter.gain.value = 0;
 
-    // TREBLE FILTER: High-shelf
     trebleFilter = audioContext.createBiquadFilter();
     trebleFilter.type = 'highshelf';
     trebleFilter.frequency.value = 3000;
     trebleFilter.gain.value = 0;
 
-    // STEREO PANNER
     panNode = audioContext.createStereoPanner ? 
         audioContext.createStereoPanner() : 
         null;
 
-    // 3D SPATIAL PANNER
     pannerNode = audioContext.createPanner();
     pannerNode.panningModel = 'HRTF';
     pannerNode.distanceModel = 'inverse';
@@ -172,7 +182,6 @@ function initializeAudioNodes() {
     pannerNode.coneOuterGain = 0;
     pannerNode.setPosition(0, 0, -1);
 
-    // CONFIGURAR O LISTENER
     if (audioContext.listener.forwardX) {
         audioContext.listener.forwardX.value = 0;
         audioContext.listener.forwardY.value = 0;
@@ -192,7 +201,6 @@ function initializeAudioNodes() {
         audioContext.listener.setPosition(0, 0, 0);
     }
 
-    // REVERB: Convolver with dry/wet mix
     convolverNode = audioContext.createConvolver();
     reverbDryGain = audioContext.createGain();
     reverbWetGain = audioContext.createGain();
@@ -200,13 +208,11 @@ function initializeAudioNodes() {
     reverbWetGain.gain.value = 0.0;
     createReverbImpulse(2, 0);
 
-    // DELAY: Echo effect with feedback
     delayNode = audioContext.createDelay(5.0);
     delayNode.delayTime.value = 0.3;
     delayGain = audioContext.createGain();
     delayGain.gain.value = 0;
 
-    // COMPRESSOR/LIMITER: Prevent clipping at output
     compressorNode = audioContext.createDynamicsCompressor();
     compressorNode.threshold.value = -6;
     compressorNode.knee.value = 0;
@@ -214,11 +220,9 @@ function initializeAudioNodes() {
     compressorNode.attack.value = 0.003;
     compressorNode.release.value = 0.1;
 
-    // OUTPUT GAIN: Final level control (-1 dB default for safety)
     outputGainNode = audioContext.createGain();
     outputGainNode.gain.value = dbToGain(-1);
 
-    // ANALYSER: For visualization and metering
     analyser = audioContext.createAnalyser();
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.8;
@@ -298,7 +302,7 @@ function stop() {
     }
     
     isPlaying = false;
-    pauseTime = 0;  // ✅ Só reseta se chamar stop() mesmo
+    pauseTime = 0;
     startTime = 0;
     playBtn.innerHTML = '▶️ Play';
     progressFill.style.width = '0%';
@@ -307,7 +311,6 @@ function stop() {
     cancelAnimationFrame(animationId);
     stopLevelMeter();
 }
-
 
 // ====================================
 // AUDIO GRAPH CONNECTION
@@ -368,11 +371,10 @@ function connectAudioGraph() {
     }
 
     currentNode.connect(outputGainNode);
-
     outputGainNode.connect(analyser);
-
     analyser.connect(audioContext.destination);
 }
+
 // ====================================
 // LEVEL METERING & CLIPPING DETECTION
 // ====================================
@@ -544,7 +546,7 @@ function visualize() {
 }
 
 // ====================================
-// PROGRESS BAR - MELHORADO E PRECISO
+// PROGRESS BAR - CORRIGIDO COM DURAÇÃO AJUSTADA
 // ====================================
 
 let isDragging = false;
@@ -565,7 +567,6 @@ function updateProgress() {
     }
 }
 
-// Mouse/Touch events para melhor controle
 progressBar.addEventListener('mousedown', startDragging);
 progressBar.addEventListener('touchstart', startDragging);
 
@@ -590,7 +591,6 @@ function startDragging(e) {
     isDragging = true;
     wasPausedBeforeDrag = !isPlaying;
     
-    // Pausa temporariamente para evitar clipping
     if (isPlaying) {
         sourceNode.stop();
         isPlaying = false;
@@ -607,7 +607,6 @@ function updateSeekPosition(clientX) {
     const percentage = Math.max(0, Math.min(1, x / rect.width));
     const newTime = percentage * audioBuffer.duration;
     
-    // Atualiza visual imediatamente
     progressFill.style.width = (percentage * 100) + '%';
     currentTimeEl.textContent = formatTime(newTime);
     pauseTime = newTime;
@@ -619,13 +618,10 @@ function stopDragging() {
     isDragging = false;
     progressBar.style.cursor = 'pointer';
     
-    // Retoma playback automaticamente se estava tocando
     if (!wasPausedBeforeDrag) {
         play();
     }
 }
-
-// Click simples para seek rápido
 
 progressBar.addEventListener('click', (e) => {
     if (!audioBuffer || isDragging) return;
@@ -654,8 +650,6 @@ progressBar.addEventListener('click', (e) => {
     }
 });
 
-
-
 // ====================================
 // CONTROL SLIDERS
 // ====================================
@@ -677,16 +671,12 @@ document.getElementById('outputGainSlider').addEventListener('input', (e) => {
     clipCount = 0;
 });
 
-// LIMITER toggle - 100% REAL-TIME
 const limiterToggle = document.getElementById('limiterToggle');
 limiterToggle.addEventListener('click', () => {
     limiterEnabled = !limiterEnabled;
     limiterToggle.classList.toggle('active');
-    
-    // NÃO reinicia a música, apenas marca para próxima vez
     console.log('Limiter ' + (limiterEnabled ? 'enabled' : 'disabled') + ' - will apply on next play');
 });
-
 
 document.getElementById('limiterThresholdSlider').addEventListener('input', (e) => {
     const value = parseFloat(e.target.value);
@@ -696,9 +686,12 @@ document.getElementById('limiterThresholdSlider').addEventListener('input', (e) 
     }
 });
 
+// ✅ CORRIGIDO: Atualiza o tempo total quando velocidade muda
 document.getElementById('speedSlider').addEventListener('input', (e) => {
     const value = parseFloat(e.target.value);
     document.getElementById('speedValue').textContent = value.toFixed(1) + 'x';
+    
+    updateTotalTimeDisplay(); // ✅ ATUALIZA O TEMPO TOTAL
     
     if (isPlaying && sourceNode) {
         const pitchShift = parseFloat(document.getElementById('pitchSlider').value);
@@ -707,9 +700,12 @@ document.getElementById('speedSlider').addEventListener('input', (e) => {
     }
 });
 
+// ✅ CORRIGIDO: Atualiza o tempo total quando pitch muda
 document.getElementById('pitchSlider').addEventListener('input', (e) => {
     const value = parseInt(e.target.value);
     document.getElementById('pitchValue').textContent = value + ' semitones';
+    
+    updateTotalTimeDisplay(); // ✅ ATUALIZA O TEMPO TOTAL
     
     if (isPlaying && sourceNode) {
         const speedControl = parseFloat(document.getElementById('speedSlider').value);
@@ -766,7 +762,6 @@ document.getElementById('panSlider').addEventListener('input', (e) => {
     }
 });
 
-// REVERB control - 100% REAL-TIME
 document.getElementById('reverbSlider').addEventListener('input', (e) => {
     const value = parseInt(e.target.value);
     document.getElementById('reverbValue').textContent = value + '%';
@@ -774,14 +769,11 @@ document.getElementById('reverbSlider').addEventListener('input', (e) => {
     const wetLevel = value / 100;
     const dryLevel = 1 - wetLevel;
     
-    // Aplica em tempo real SEM parar a música
     if (reverbDryGain) reverbDryGain.gain.value = dryLevel;
     if (reverbWetGain) reverbWetGain.gain.value = wetLevel * 0.6;
     
-    // Atualiza impulse response em background
     createReverbImpulse(2, value / 20);
 });
-
 
 document.getElementById('echoSlider').addEventListener('input', (e) => {
     const value = parseInt(e.target.value);
@@ -823,7 +815,6 @@ document.getElementById('eightDSpeed').addEventListener('input', (e) => {
     }
 });
 
-// 3D SPATIAL toggle - 100% REAL-TIME
 const spatialToggle = document.getElementById('spatialToggle');
 spatialToggle.addEventListener('click', () => {
     spatialEnabled = !spatialEnabled;
@@ -835,12 +826,10 @@ spatialToggle.addEventListener('click', () => {
         stop3DSpatialAudio();
     }
     
-    // NÃO para a música! Apenas avisa que precisa reconectar
     if (isPlaying) {
         console.log('⚠️ 3D Spatial: Reconnect audio graph on next play for full effect');
     }
 });
-
 
 // ====================================
 // 3D SPATIAL AUDIO ANIMATION
@@ -917,6 +906,7 @@ function stop8DAudio() {
         panNode.pan.value = parseInt(document.getElementById('panSlider').value) / 100;
     }
 }
+
 // ====================================
 // PRESETS
 // ====================================
@@ -1017,6 +1007,8 @@ function applyPreset(preset) {
     } else if (!preset.spatial && spatialEnabled) {
         spatialToggle.click();
     }
+    
+    updateTotalTimeDisplay(); // ✅ ATUALIZA O TEMPO TOTAL
 
     if (isPlaying) {
         const currentPos = audioContext.currentTime - startTime;
@@ -1335,7 +1327,6 @@ waveformCanvas.height = waveformCanvas.offsetHeight * 2;
 document.addEventListener('keydown', (e) => {
     if (!audioBuffer) return;
     
-    // Previne ação padrão apenas para teclas que usamos
     const targetTag = e.target.tagName.toLowerCase();
     if (targetTag === 'input' || targetTag === 'textarea') return;
     
@@ -1343,58 +1334,56 @@ document.addEventListener('keydown', (e) => {
         case ' ':
         case 'k':
             e.preventDefault();
-            play(); // Play/Pause
+            play();
             break;
             
         case 'arrowleft':
             e.preventDefault();
-            seekRelative(-5); // -5 segundos
+            seekRelative(-5);
             break;
             
         case 'arrowright':
             e.preventDefault();
-            seekRelative(5); // +5 segundos
+            seekRelative(5);
             break;
             
         case 'j':
             e.preventDefault();
-            seekRelative(-10); // -10 segundos
+            seekRelative(-10);
             break;
             
         case 'l':
             e.preventDefault();
-            seekRelative(10); // +10 segundos
+            seekRelative(10);
             break;
             
         case 'home':
             e.preventDefault();
-            seekTo(0); // Início
+            seekTo(0);
             break;
             
         case 'end':
             e.preventDefault();
-            seekTo(audioBuffer.duration); // Fim
+            seekTo(audioBuffer.duration);
             break;
             
         case 'arrowup':
             e.preventDefault();
-            changeVolume(5); // +5%
+            changeVolume(5);
             break;
             
         case 'arrowdown':
             e.preventDefault();
-            changeVolume(-5); // -5%
+            changeVolume(-5);
             break;
             
         case 'm':
             e.preventDefault();
-            toggleMute(); // Mute/Unmute
+            toggleMute();
             break;
     }
 });
 
-
-// Função auxiliar para seek relativo
 function seekRelative(seconds) {
     if (!audioBuffer) return;
     
@@ -1404,7 +1393,7 @@ function seekRelative(seconds) {
     const wasPlaying = isPlaying;
     
     if (isPlaying) {
-        pauseWithoutReset(); // ✅ USA A NOVA FUNÇÃO
+        pauseWithoutReset();
     }
     
     pauseTime = newTime;
@@ -1423,7 +1412,7 @@ function seekTo(time) {
     const wasPlaying = isPlaying;
     
     if (isPlaying) {
-        pauseWithoutReset(); // ✅ USA A NOVA FUNÇÃO
+        pauseWithoutReset();
     }
     
     pauseTime = newTime;
@@ -1435,34 +1424,6 @@ function seekTo(time) {
     }
 }
 
-// Função auxiliar para seek absoluto
-function seekTo(time) {
-    if (!audioBuffer) return;
-    
-    const newTime = Math.max(0, Math.min(audioBuffer.duration, time));
-    const wasPlaying = isPlaying;
-    
-    // 🔴 Para sem resetar variáveis
-    if (isPlaying && sourceNode) {
-        sourceNode.stop();
-        sourceNode.disconnect();
-        isPlaying = false;
-        playBtn.innerHTML = '▶️ Play';
-        cancelAnimationFrame(animationId);
-        stopLevelMeter();
-    }
-    
-    pauseTime = newTime;
-    progressFill.style.width = ((newTime / audioBuffer.duration) * 100) + '%';
-    currentTimeEl.textContent = formatTime(newTime);
-    
-    if (wasPlaying) {
-        play();
-    }
-}
-
-
-// Função auxiliar para volume
 let previousVolume = 100;
 let isMuted = false;
 
@@ -1493,5 +1454,4 @@ function toggleMute() {
     }
 }
 
-
-console.log('🎵 Real-Time Audio Editor v2.0 - Com Gain Staging & Dynamics Control ✅');
+console.log('🎵 Real-Time Audio Editor v2.1 - Com duração ajustada por velocidade ✅');
