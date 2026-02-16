@@ -1,7 +1,10 @@
 # 🎵 Real-Time Audio Editor
 
+### 🌐 Live Demo
+https://delislt.github.io/audio-editor/
+
 A professional audio editor that runs **entirely in your browser**.  
-Real-time processing, advanced effects, precise monitoring, and offline rendering without any backend.
+Real-time processing, advanced effects, precise monitoring, and high-quality offline rendering with no backend.
 
 Perfect for DJs, producers, podcasters, gamers, and audio enthusiasts.
 
@@ -89,7 +92,7 @@ Rendered offline before download for maximum quality.
 
 - Play / Pause  
 - Stop  
-- Reset All parameters  
+- Reset all parameters  
 
 ---
 
@@ -141,33 +144,3 @@ All audio processing happens **locally in your browser**.
 No files are uploaded to any server.
 
 ---
-
-## 🌐 Live Demo
-
-The project is hosted on **GitHub Pages**.  
-Open the published link and start editing instantly.
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files, to deal in the software
-without restriction, including without limitation the rights to use, copy,
-modify, merge, publish, distribute, sublicense, and/or sell copies of the
-software, and to permit persons to whom the software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
