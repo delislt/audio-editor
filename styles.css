@@ -431,10 +431,10 @@ h1 {
     letter-spacing: 1.5px;
 }
 
-/* Controls Grid - Premium Cards Enhanced */
+/* Controls Grid - Premium Cards Enhanced - FIXED TO MAINTAIN 3 COLUMNS */
 .controls-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 22px;
     margin-bottom: 35px;
 }
@@ -907,6 +907,12 @@ input:focus-visible {
 .preset-btn:nth-child(6) { animation-delay: 0.35s; }
 
 /* Responsive Design */
+@media (max-width: 900px) {
+    .controls-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
 @media (max-width: 768px) {
     h1 {
         font-size: 2.5em;
@@ -914,10 +920,6 @@ input:focus-visible {
 
     .subtitle {
         font-size: 1.1em;
-    }
-
-    .controls-grid {
-        grid-template-columns: 1fr;
     }
 
     .presets-grid {
@@ -948,6 +950,12 @@ input:focus-visible {
 
     .upload-icon {
         font-size: 4em;
+    }
+}
+
+@media (max-width: 600px) {
+    .controls-grid {
+        grid-template-columns: 1fr;
     }
 }
 
