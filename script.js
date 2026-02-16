@@ -48,6 +48,14 @@ const fileNameEl = document.getElementById('fileName');
 const waveformCanvas = document.getElementById('waveform');
 const waveformCtx = waveformCanvas.getContext('2d');
 
+// 🍎 iOS Detection
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+              (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+if (isIOS) {
+    console.log('🍎 iOS device detected - applying iOS-specific audio handling');
+}
+
 // ✅ NOVA FUNÇÃO: Calcula duração ajustada baseada em speed e pitch
 function getAdjustedDuration() {
     if (!audioBuffer) return 0;
@@ -65,6 +73,24 @@ function updateTotalTimeDisplay() {
     if (!audioBuffer) return;
     const adjustedDuration = getAdjustedDuration();
     totalTimeEl.textContent = formatTime(adjustedDuration);
+}
+
+// 🍎 iOS: Resume AudioContext if suspended
+async function resumeAudioContext() {
+    if (!audioContext) return;
+    
+    if (audioContext.state === 'suspended') {
+        console.log('🍎 iOS: Resuming suspended AudioContext...');
+        try {
+            await audioContext.resume();
+            console.log('✅ AudioContext resumed successfully');
+        } catch (error) {
+            console.error('❌ Failed to resume AudioContext:', error);
+            alert('Failed to resume audio. Please try again.');
+            return false;
+        }
+    }
+    return true;
 }
 
 // Função auxiliar para parar SEM resetar posição
@@ -124,8 +150,15 @@ async function loadAudioFile(file) {
     fileNameEl.textContent = currentFileName;
 
     try {
+        // 🍎 iOS: Create AudioContext on user interaction
         if (!audioContext) {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            console.log('🎵 AudioContext created with state:', audioContext.state);
+            
+            // 🍎 iOS: Try to resume immediately after creation
+            if (isIOS && audioContext.state === 'suspended') {
+                await resumeAudioContext();
+            }
         }
 
         const arrayBuffer = await file.arrayBuffer();
@@ -137,9 +170,14 @@ async function loadAudioFile(file) {
 
         initializeAudioNodes();
         drawWaveform();
-        updateTotalTimeDisplay(); // ✅ USA A NOVA FUNÇÃO
+        updateTotalTimeDisplay();
 
         console.log('✅ Audio loaded successfully');
+        
+        // 🍎 iOS: Show helpful message
+        if (isIOS) {
+            console.log('🍎 iOS: Ready to play - click Play button to start');
+        }
     } catch (error) {
         console.error('Error loading audio:', error);
         alert('Failed to load audio file. Please try another file.');
@@ -252,7 +290,7 @@ function createReverbImpulse(duration, decay) {
 // AUDIO PLAYBACK CONTROL
 // ====================================
 
-function play() {
+async function play() {
     if (!audioBuffer) return;
 
     if (isPlaying) {
@@ -260,27 +298,39 @@ function play() {
         return;
     }
 
+    // 🍎 iOS: Resume AudioContext before playing
+    const resumed = await resumeAudioContext();
+    if (!resumed) return;
+
     sourceNode = audioContext.createBufferSource();
     sourceNode.buffer = audioBuffer;
 
     connectAudioGraph();
 
     const offset = pauseTime;
-    sourceNode.start(0, offset);
-    startTime = audioContext.currentTime - offset;
-    isPlaying = true;
-
-    playBtn.innerHTML = '⏸️ Pause';
     
-    sourceNode.onended = () => {
-        if (isPlaying) {
-            stop();
-        }
-    };
+    try {
+        sourceNode.start(0, offset);
+        startTime = audioContext.currentTime - offset;
+        isPlaying = true;
 
-    visualize();
-    updateProgress();
-    startLevelMeter();
+        playBtn.innerHTML = '⏸️ Pause';
+        
+        sourceNode.onended = () => {
+            if (isPlaying) {
+                stop();
+            }
+        };
+
+        visualize();
+        updateProgress();
+        startLevelMeter();
+        
+        console.log('✅ Playback started successfully');
+    } catch (error) {
+        console.error('❌ Failed to start playback:', error);
+        alert('Failed to play audio. Please try again.');
+    }
 }
 
 function pause() {
@@ -1462,4 +1512,4 @@ function toggleMute() {
     }
 }
 
-console.log('🎵 Real-Time Audio Editor v2.2 - Precisão aprimorada nos controles ✅');
+console.log('🎵 Real-Time Audio Editor v2.3 - iOS Safari support added 🍎✅');
