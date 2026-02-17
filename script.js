@@ -341,6 +341,8 @@ function createReverbImpulse(duration, decay) {
     }
 
     convolverNode.buffer = impulse;
+    console.log('✅ Playback started successfully');
+    updateMediaSession();
 }
 
 // ====================================
@@ -399,6 +401,88 @@ async function play() {
     }
 }
 
+// ====================================
+// MEDIA SESSION API - BACKGROUND AUDIO
+// ====================================
+
+function updateMediaSession() {
+    if (!('mediaSession' in navigator)) {
+        console.warn('⚠️ Media Session API not supported');
+        return;
+    }
+
+    const metadata = {
+        title: currentFileName || 'Audio Editor',
+        artist: 'Real-Time Audio Editor',
+        album: 'Edited Audio',
+        artwork: [
+            { src: 'android-chrome-192x192.png', sizes: '192x192', type: 'image/png' },
+            { src: 'android-chrome-512x512.png', sizes: '512x512', type: 'image/png' }
+        ]
+    };
+
+    navigator.mediaSession.metadata = new MediaMetadata(metadata);
+
+    // Handlers para controles de mídia (lockscreen, fones, notificação)
+    navigator.mediaSession.setActionHandler('play', () => {
+        console.log('🎵 Media Session: Play');
+        play();
+    });
+
+    navigator.mediaSession.setActionHandler('pause', () => {
+        console.log('⏸️ Media Session: Pause');
+        pause();
+    });
+
+    navigator.mediaSession.setActionHandler('stop', () => {
+        console.log('⏹️ Media Session: Stop');
+        stop();
+    });
+
+    navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+        console.log('⏪ Media Session: Seek backward');
+        seekRelative(-10);
+    });
+
+    navigator.mediaSession.setActionHandler('seekforward', (details) => {
+        console.log('⏩ Media Session: Seek forward');
+        seekRelative(10);
+    });
+
+    navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime) {
+            console.log('🎯 Media Session: Seek to', details.seekTime);
+            seekTo(details.seekTime);
+        }
+    });
+
+    // Atualizar posição do playback continuamente
+    navigator.mediaSession.setPositionState({
+        duration: audioBuffer ? audioBuffer.duration : 0,
+        playbackRate: 1.0,
+        position: pauseTime || 0
+    });
+
+    console.log('✅ Media Session API initialized');
+}
+
+// Atualizar posição durante reprodução
+function updateMediaSessionPosition() {
+    if ('mediaSession' in navigator && navigator.mediaSession.setPositionState) {
+        try {
+            const currentTime = isPlaying ? (audioContext.currentTime - startTime) : pauseTime;
+            navigator.mediaSession.setPositionState({
+                duration: audioBuffer.duration,
+                playbackRate: sourceNode?.playbackRate.value || 1.0,
+                position: Math.min(currentTime, audioBuffer.duration)
+            });
+        } catch (e) {
+            // Ignorar erros de posição inválida
+        }
+    }
+}
+
+
 function pause() {
     if (!isPlaying) return;
 
@@ -413,6 +497,7 @@ function pause() {
     
     cancelAnimationFrame(animationId);
     stopLevelMeter();
+    updateMediaSession(); 
 }
 
 function stop() {
@@ -685,6 +770,9 @@ function updateProgress() {
 
     progressFill.style.width = progress + '%';
     currentTimeEl.textContent = formatTime(currentTime);
+    
+    // 🎵 Atualizar Media Session
+    updateMediaSessionPosition();
 
     if (currentTime < duration) {
         setTimeout(updateProgress, 100);
