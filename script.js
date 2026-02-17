@@ -1594,4 +1594,4 @@ function toggleMute() {
     }
 }
 
-console.log('🎵 Real-Time Audio Editor v2.4 - Enhanced iOS Safari support 🍎✅');
+console.log('Real-Time Audio Editor v1.0;
