@@ -94,6 +94,7 @@
   </div>
 
   <!-- Player Section -->
+  <!-- NOTE: has BOTH id="playerSection" AND class="player-section" so script.js can find it -->
   <div class="player-section glass-card reveal-fade" id="playerSection">
     <div class="file-info">
       <i data-lucide="file-audio"></i>
@@ -123,7 +124,8 @@
         <i data-lucide="square"></i>
       </button>
       <button class="play-btn glass-btn" id="playBtn" aria-label="Play">
-        <i data-lucide="play"></i>
+        <svg id="playIcon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <svg id="pauseIcon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
       </button>
       <button class="control-icon-btn glass-btn" id="resetBtn" aria-label="Reset all">
         <i data-lucide="refresh-ccw"></i>
