@@ -166,16 +166,17 @@ input { font: inherit; color: inherit; }
 .glass-card:hover::before { opacity: 1; }
 
 /* ---- Scroll Reveal ---- */
-.reveal-fade { opacity: 1; }
-@supports (animation-timeline: scroll()) {
-  .reveal-fade {
-    opacity: 0;
-    animation: fadeReveal linear both;
-    animation-timeline: view();
-    animation-range: entry 0% entry 60%;
-  }
+/* NOTE: Using JS-class approach instead of animation-timeline to avoid
+   opacity:0 staying stuck when elements are revealed via display:block */
+.reveal-fade {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.6s cubic-bezier(0.16,1,0.3,1), transform 0.6s cubic-bezier(0.16,1,0.3,1);
 }
-@keyframes fadeReveal { to { opacity: 1; } }
+.reveal-fade.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
 
 /* ---- Header ---- */
 .header-card {
@@ -396,7 +397,7 @@ kbd {
 }
 .player-section.active {
   display: block;
-  animation: fadeInUp 0.5s cubic-bezier(0.16,1,0.3,1);
+  animation: fadeInUp 0.5s cubic-bezier(0.16,1,0.3,1) both;
 }
 .controls-grid.player-section.active { display: grid; }
 @keyframes fadeInUp {
@@ -523,7 +524,7 @@ kbd {
   color: white;
   box-shadow: 0 8px 28px var(--accent-glow);
 }
-.play-btn i { width: 24px; height: 24px; }
+.play-btn svg { width: 24px; height: 24px; }
 .play-btn:hover {
   box-shadow: 0 12px 36px var(--accent-glow);
   transform: translateY(-2px) scale(1.05);
