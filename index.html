@@ -1,220 +1,347 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
-    <link rel="manifest" href="site.webmanifest">
-<title>Real-Time Audio Editor</title>
-    <link rel="stylesheet" href="styles.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audio Editor</title>
+
+  <!-- Fonts -->
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Icons -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+  <!-- Favicon -->
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🎵 Real-Time Audio Editor</h1>
-            <p class="subtitle">Professional browser-based audio processing with Web Audio API</p>
-        </header>
-        <!-- Keyboard Shortcuts Help -->
-        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 16px; padding: 20px; margin-bottom: 30px; backdrop-filter: blur(10px);">
-    <details>
-        <summary style="cursor: pointer; font-weight: 600; color: #667eea; user-select: none;">
-            ⌨️ Keyboard Shortcuts
-        </summary>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 15px; font-size: 0.9em;">
-            <div><kbd style="background: rgba(0,0,0,0.4); padding: 4px 8px; border-radius: 6px; font-family: monospace;">Space</kbd> Play/Pause</div>
-            <div><kbd style="background: rgba(0,0,0,0.4); padding: 4px 8px; border-radius: 6px; font-family: monospace;">←</kbd> -5s</div>
-            <div><kbd style="background: rgba(0,0,0,0.4); padding: 4px 8px; border-radius: 6px; font-family: monospace;">→</kbd> +5s</div>
-            <div><kbd style="background: rgba(0,0,0,0.4); padding: 4px 8px; border-radius: 6px; font-family: monospace;">J</kbd> -10s</div>
-            <div><kbd style="background: rgba(0,0,0,0.4); padding: 4px 8px; border-radius: 6px; font-family: monospace;">L</kbd> +10s</div>
-            <div><kbd style="background: rgba(0,0,0,0.4); padding: 4px 8px; border-radius: 6px; font-family: monospace;">↑</kbd> Volume +</div>
-            <div><kbd style="background: rgba(0,0,0,0.4); padding: 4px 8px; border-radius: 6px; font-family: monospace;">↓</kbd> Volume -</div>
-            <div><kbd style="background: rgba(0,0,0,0.4); padding: 4px 8px; border-radius: 6px; font-family: monospace;">M</kbd> Mute</div>
-        </div>
-    </details>
+
+<!-- Ambient background orbs -->
+<div class="ambient" aria-hidden="true">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
 </div>
 
-        <!-- Upload Section -->
-        <div class="upload-section" id="uploadSection">
-            <div class="upload-icon">📁</div>
-            <h2>Upload Your Audio File</h2>
-            <p>Click to browse or drag and drop</p>
-            <p style="margin-top: 10px; color: #a0a0a0; font-size: 0.9em;">Supported: MP3, WAV, OGG, M4A, AAC, FLAC</p>
-            <input type="file" id="fileInput" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/ogg,audio/x-m4a,audio/m4a,audio/aac,audio/flac,audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac">
+<div class="container">
+
+  <!-- Header -->
+  <header class="glass-card header-card reveal-fade">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="logo-mark" aria-label="Audio Editor logo">
+          <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+            <rect width="36" height="36" rx="10" fill="var(--accent)" opacity="0.15"/>
+            <rect x="8" y="20" width="4" height="10" rx="2" fill="var(--accent)"/>
+            <rect x="14" y="14" width="4" height="16" rx="2" fill="var(--accent)" opacity="0.9"/>
+            <rect x="20" y="8" width="4" height="22" rx="2" fill="var(--accent)"/>
+            <rect x="26" y="16" width="4" height="14" rx="2" fill="var(--accent)" opacity="0.75"/>
+          </svg>
         </div>
-
-        <!-- Player Section -->
-        <div class="player-section" id="playerSection">
-            <div class="file-info">
-                <span>Now playing: </span><span class="file-name" id="fileName"></span>
-            </div>
-
-            <!-- Waveform Visualization -->
-            <div class="waveform-container">
-                <canvas id="waveform"></canvas>
-            </div>
-
-            <!-- Progress Bar -->
-            <div class="progress-bar" id="progressBar">
-                <div class="progress-fill" id="progressFill"></div>
-            </div>
-
-            <!-- Time Display -->
-            <div class="time-display">
-                <span id="currentTime">0:00</span> / <span id="totalTime">0:00</span>
-            </div>
-
-            <!-- Playback Controls -->
-            <div class="playback-controls">
-                <button class="btn" id="playBtn">▶️ Play</button>
-                <button class="btn btn-secondary" id="stopBtn">⏹️ Stop</button>
-                <button class="btn btn-secondary" id="resetBtn">🔄 Reset All</button>
-                <button class="btn" id="downloadBtn">💾 Download</button>
-            </div>
+        <div>
+          <h1>Audio Editor</h1>
+          <p class="subtitle">Browser-based real-time audio processing</p>
         </div>
-
-        <!-- Presets Section -->
-        <div class="presets-section player-section">
-            <div class="presets-title">🎚️ Quick Presets</div>
-            <div class="presets-grid">
-                <button class="preset-btn" data-preset="normal">Normal</button>
-                <button class="preset-btn" data-preset="nightcore">Nightcore</button>
-                <button class="preset-btn" data-preset="deepbass">Deep Bass</button>
-                <button class="preset-btn" data-preset="3dsurround">3D Surround</button>
-                <button class="preset-btn" data-preset="8daudio">8D Audio</button>
-                <button class="preset-btn" data-preset="concert">Concert Hall</button>
-            </div>
-        </div>
-
-        <!-- Audio Controls -->
-        <div class="controls-grid player-section">
-            <!-- Playback Speed -->
-            <div class="control-group">
-                <div class="control-header">
-                    <span class="control-label">⏩ Playback Speed</span>
-                    <span class="control-value" id="speedValue">1.0x</span>
-                </div>
-                <input type="range" id="speedSlider" min="0.5" max="2" step="0.01" value="1">
-            </div>
-
-            <!-- Pitch -->
-            <div class="control-group">
-                <div class="control-header">
-                    <span class="control-label">🎼 Pitch Shift</span>
-                    <span class="control-value" id="pitchValue">0 semitones</span>
-                </div>
-                <input type="range" id="pitchSlider" min="-12" max="12" step="0.1" value="0">
-            </div>
-
-            <!-- Volume -->
-            <div class="control-group">
-                <div class="control-header">
-                    <span class="control-label">🔊 Volume</span>
-                    <span class="control-value" id="volumeValue">100%</span>
-                </div>
-                <input type="range" id="volumeSlider" min="0" max="150" step="0.5" value="100">
-            </div>
-
-            <!-- Bass Boost -->
-            <div class="control-group">
-                <div class="control-header">
-                    <span class="control-label">🔈 Bass Boost</span>
-                    <span class="control-value" id="bassValue">0 dB</span>
-                </div>
-                <input type="range" id="bassSlider" min="0" max="20" step="0.1" value="0">
-            </div>
-
-            <!-- Treble -->
-            <div class="control-group">
-                <div class="control-header">
-                    <span class="control-label">🔉 Treble</span>
-                    <span class="control-value" id="trebleValue">0 dB</span>
-                </div>
-                <input type="range" id="trebleSlider" min="-15" max="15" step="0.1" value="0">
-            </div>
-
-            <!-- Panning -->
-            <div class="control-group">
-                <div class="control-header">
-                    <span class="control-label">↔️ Stereo Pan</span>
-                    <span class="control-value" id="panValue">Center</span>
-                </div>
-                <input type="range" id="panSlider" min="-100" max="100" step="0.5" value="0">
-            </div>
-
-            <!-- Reverb -->
-            <div class="control-group">
-                <div class="control-header">
-                    <span class="control-label">🎭 Reverb</span>
-                    <span class="control-value" id="reverbValue">0%</span>
-                </div>
-                <input type="range" id="reverbSlider" min="0" max="100" step="0.5" value="0">
-            </div>
-
-            <!-- Echo -->
-            <div class="control-group">
-                <div class="control-header">
-                    <span class="control-label">📢 Echo / Delay</span>
-                    <span class="control-value" id="echoValue">0%</span>
-                </div>
-                <input type="range" id="echoSlider" min="0" max="100" step="0.5" value="0">
-            </div>
-
-            <!-- 8D Audio Toggle -->
-            <div class="control-group">
-                <div class="control-header">
-                    <span class="control-label">🌀 8D Audio Effect</span>
-                    <div class="toggle" id="eightDToggle">
-                        <div class="toggle-slider"></div>
-                    </div>
-                </div>
-                <div class="speed-control">
-                    <label>Speed:</label>
-                    <input type="range" id="eightDSpeed" min="0.5" max="5" step="0.1" value="2">
-                    <span class="control-value" id="eightDSpeedValue">2.0</span>
-                </div>
-            </div>
-
-            <!-- 3D Spatial Audio Toggle -->
-            <div class="control-group">
-                <div class="control-header">
-                    <span class="control-label">🎧 3D Spatial Audio</span>
-                    <div class="toggle" id="spatialToggle">
-                        <div class="toggle-slider"></div>
-                    </div>
-                </div>
-                <div class="speed-control">
-                    <label>Speed:</label>
-                    <input type="range" id="spatial3DSpeed" min="0.5" max="3" step="0.1" value="1">
-                    <span class="control-value" id="spatial3DSpeedValue">1.0x</span>
-                </div>
-                <div class="speed-description">
-                    Sound circles around you in 3D
-                </div>
-            </div>
-        </div>
+      </div>
+      <div class="header-actions">
+        <button class="theme-toggle glass-btn icon-btn" data-theme-toggle aria-label="Switch to light mode">
+          <i data-lucide="moon"></i>
+        </button>
+      </div>
     </div>
-    
-    <!-- Hidden elements for JavaScript compatibility -->
-    <div style="display: none;">
-        <input type="range" id="preGainSlider" value="-9">
-        <span id="preGainValue"></span>
-        <input type="range" id="outputGainSlider" value="-1">
-        <span id="outputGainValue"></span>
-        <div id="limiterToggle" class="toggle active"></div>
-        <input type="range" id="limiterThresholdSlider" value="-6">
-        <span id="limiterThresholdValue"></span>
-        <div id="meterFill"></div>
-        <div id="meterPeak"></div>
-        <span id="peakValue"></span>
-        <span id="rmsValue"></span>
-        <div id="clipIndicator"></div>
+
+    <!-- Keyboard shortcuts -->
+    <details class="shortcuts-panel">
+      <summary class="shortcuts-summary">
+        <i data-lucide="keyboard"></i>
+        <span>Keyboard Shortcuts</span>
+        <i data-lucide="chevron-down" class="chevron"></i>
+      </summary>
+      <div class="shortcuts-grid">
+        <div class="shortcut-item"><kbd>Space</kbd><span>Play / Pause</span></div>
+        <div class="shortcut-item"><kbd>←</kbd><span>-5 seconds</span></div>
+        <div class="shortcut-item"><kbd>→</kbd><span>+5 seconds</span></div>
+        <div class="shortcut-item"><kbd>J</kbd><span>-10 seconds</span></div>
+        <div class="shortcut-item"><kbd>L</kbd><span>+10 seconds</span></div>
+        <div class="shortcut-item"><kbd>↑</kbd><span>Volume up</span></div>
+        <div class="shortcut-item"><kbd>↓</kbd><span>Volume down</span></div>
+        <div class="shortcut-item"><kbd>M</kbd><span>Mute</span></div>
+      </div>
+    </details>
+  </header>
+
+  <!-- Upload Section -->
+  <div class="upload-section glass-card reveal-fade" id="uploadSection">
+    <input type="file" id="fileInput" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/ogg,audio/x-m4a,audio/m4a,audio/aac,audio/flac,audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac">
+    <div class="upload-icon-wrap">
+      <div class="upload-ring"></div>
+      <i data-lucide="music-4" class="upload-icon-svg"></i>
     </div>
-    
-    <script src="script.js"></script>
+    <h2>Drop your audio file here</h2>
+    <p class="upload-hint">or click to browse</p>
+    <p class="upload-formats">MP3 · WAV · OGG · M4A · AAC · FLAC</p>
+    <button class="upload-btn glass-btn" onclick="document.getElementById('fileInput').click()">
+      <i data-lucide="upload"></i> Choose File
+    </button>
+  </div>
+
+  <!-- Player Section -->
+  <div class="player-section glass-card reveal-fade" id="playerSection">
+    <div class="file-info">
+      <i data-lucide="file-audio"></i>
+      <span>Now playing: </span>
+      <span class="file-name" id="fileName">—</span>
+    </div>
+
+    <div class="waveform-container">
+      <canvas id="waveform"></canvas>
+    </div>
+
+    <div class="progress-wrap">
+      <div class="progress-bar" id="progressBar">
+        <div class="progress-fill" id="progressFill"></div>
+        <div class="progress-thumb" id="progressThumb"></div>
+      </div>
+    </div>
+
+    <div class="time-display">
+      <span id="currentTime">0:00</span>
+      <span class="time-sep">/</span>
+      <span id="totalTime">0:00</span>
+    </div>
+
+    <div class="playback-controls">
+      <button class="control-icon-btn glass-btn" id="stopBtn" aria-label="Stop">
+        <i data-lucide="square"></i>
+      </button>
+      <button class="play-btn glass-btn" id="playBtn" aria-label="Play">
+        <i data-lucide="play"></i>
+      </button>
+      <button class="control-icon-btn glass-btn" id="resetBtn" aria-label="Reset all">
+        <i data-lucide="refresh-ccw"></i>
+      </button>
+      <button class="download-btn glass-btn" id="downloadBtn" aria-label="Download">
+        <i data-lucide="download"></i>
+        <span>Export</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Presets Section -->
+  <div class="presets-section glass-card player-section reveal-fade">
+    <div class="section-header">
+      <i data-lucide="sliders-horizontal"></i>
+      <span>Quick Presets</span>
+    </div>
+    <div class="presets-grid">
+      <button class="preset-btn" data-preset="normal">
+        <i data-lucide="circle-dot"></i>
+        <span>Normal</span>
+      </button>
+      <button class="preset-btn" data-preset="nightcore">
+        <i data-lucide="zap"></i>
+        <span>Nightcore</span>
+      </button>
+      <button class="preset-btn" data-preset="deepbass">
+        <i data-lucide="waves"></i>
+        <span>Deep Bass</span>
+      </button>
+      <button class="preset-btn" data-preset="3dsurround">
+        <i data-lucide="radio"></i>
+        <span>3D Surround</span>
+      </button>
+      <button class="preset-btn" data-preset="8daudio">
+        <i data-lucide="rotate-3d"></i>
+        <span>8D Audio</span>
+      </button>
+      <button class="preset-btn" data-preset="concert">
+        <i data-lucide="music"></i>
+        <span>Concert Hall</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Controls Grid -->
+  <div class="controls-grid player-section reveal-fade">
+
+    <div class="control-group glass-card">
+      <div class="control-header">
+        <div class="control-label">
+          <i data-lucide="gauge"></i>
+          <span>Playback Speed</span>
+        </div>
+        <span class="control-value" id="speedValue">1.0x</span>
+      </div>
+      <input type="range" id="speedSlider" min="0.5" max="2" step="0.01" value="1">
+    </div>
+
+    <div class="control-group glass-card">
+      <div class="control-header">
+        <div class="control-label">
+          <i data-lucide="music-2"></i>
+          <span>Pitch Shift</span>
+        </div>
+        <span class="control-value" id="pitchValue">0 st</span>
+      </div>
+      <input type="range" id="pitchSlider" min="-12" max="12" step="0.1" value="0">
+    </div>
+
+    <div class="control-group glass-card">
+      <div class="control-header">
+        <div class="control-label">
+          <i data-lucide="volume-2"></i>
+          <span>Volume</span>
+        </div>
+        <span class="control-value" id="volumeValue">100%</span>
+      </div>
+      <input type="range" id="volumeSlider" min="0" max="150" step="0.5" value="100">
+    </div>
+
+    <div class="control-group glass-card">
+      <div class="control-header">
+        <div class="control-label">
+          <i data-lucide="activity"></i>
+          <span>Bass Boost</span>
+        </div>
+        <span class="control-value" id="bassValue">0 dB</span>
+      </div>
+      <input type="range" id="bassSlider" min="0" max="20" step="0.1" value="0">
+    </div>
+
+    <div class="control-group glass-card">
+      <div class="control-header">
+        <div class="control-label">
+          <i data-lucide="bar-chart-2"></i>
+          <span>Treble</span>
+        </div>
+        <span class="control-value" id="trebleValue">0 dB</span>
+      </div>
+      <input type="range" id="trebleSlider" min="-15" max="15" step="0.1" value="0">
+    </div>
+
+    <div class="control-group glass-card">
+      <div class="control-header">
+        <div class="control-label">
+          <i data-lucide="move-horizontal"></i>
+          <span>Stereo Pan</span>
+        </div>
+        <span class="control-value" id="panValue">Center</span>
+      </div>
+      <input type="range" id="panSlider" min="-100" max="100" step="0.5" value="0">
+    </div>
+
+    <div class="control-group glass-card">
+      <div class="control-header">
+        <div class="control-label">
+          <i data-lucide="droplets"></i>
+          <span>Reverb</span>
+        </div>
+        <span class="control-value" id="reverbValue">0%</span>
+      </div>
+      <input type="range" id="reverbSlider" min="0" max="100" step="0.5" value="0">
+    </div>
+
+    <div class="control-group glass-card">
+      <div class="control-header">
+        <div class="control-label">
+          <i data-lucide="repeat"></i>
+          <span>Echo / Delay</span>
+        </div>
+        <span class="control-value" id="echoValue">0%</span>
+      </div>
+      <input type="range" id="echoSlider" min="0" max="100" step="0.5" value="0">
+    </div>
+
+    <div class="control-group glass-card toggle-card">
+      <div class="control-header">
+        <div class="control-label">
+          <i data-lucide="infinity"></i>
+          <span>8D Audio</span>
+        </div>
+        <div class="toggle" id="eightDToggle" role="switch" aria-checked="false" tabindex="0">
+          <div class="toggle-thumb"></div>
+        </div>
+      </div>
+      <div class="speed-control">
+        <label>Rotation Speed</label>
+        <input type="range" id="eightDSpeed" min="0.5" max="5" step="0.1" value="2">
+        <span class="control-value" id="eightDSpeedValue">2.0</span>
+      </div>
+    </div>
+
+    <div class="control-group glass-card toggle-card">
+      <div class="control-header">
+        <div class="control-label">
+          <i data-lucide="headphones"></i>
+          <span>3D Spatial Audio</span>
+        </div>
+        <div class="toggle" id="spatialToggle" role="switch" aria-checked="false" tabindex="0">
+          <div class="toggle-thumb"></div>
+        </div>
+      </div>
+      <div class="speed-control">
+        <label>Orbit Speed</label>
+        <input type="range" id="spatial3DSpeed" min="0.5" max="3" step="0.1" value="1">
+        <span class="control-value" id="spatial3DSpeedValue">1.0x</span>
+      </div>
+      <p class="speed-description">Sound orbits around you in 3D space</p>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- Hidden compatibility inputs -->
+<div style="display:none">
+  <input type="range" id="preGainSlider" value="-9">
+  <span id="preGainValue"></span>
+  <input type="range" id="outputGainSlider" value="-1">
+  <span id="outputGainValue"></span>
+  <div id="limiterToggle" class="toggle active"></div>
+  <input type="range" id="limiterThresholdSlider" value="-6">
+  <span id="limiterThresholdValue"></span>
+  <div id="meterFill"></div>
+  <div id="meterPeak"></div>
+  <span id="peakValue"></span>
+  <span id="rmsValue"></span>
+  <div id="clipIndicator"></div>
+</div>
+
+<script>
+(function(){
+  const t = document.querySelector('[data-theme-toggle]');
+  const r = document.documentElement;
+  let d = r.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  r.setAttribute('data-theme', d);
+  function updateIcon(){
+    if(!t) return;
+    t.innerHTML = d === 'dark'
+      ? '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>'
+      : '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+  }
+  updateIcon();
+  if(t) t.addEventListener('click', () => {
+    d = d === 'dark' ? 'light' : 'dark';
+    r.setAttribute('data-theme', d);
+    updateIcon();
+  });
+})();
+</script>
+
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    if (window.lucide) lucide.createIcons();
+  });
+</script>
+
+<script src="script.js"></script>
 </body>
 </html>
