@@ -155,10 +155,6 @@
         <i data-lucide="waves"></i>
         <span>Deep Bass</span>
       </button>
-      <button class="preset-btn" data-preset="3dsurround">
-        <i data-lucide="radio"></i>
-        <span>3D Surround</span>
-      </button>
       <button class="preset-btn" data-preset="8daudio">
         <i data-lucide="rotate-3d"></i>
         <span>8D Audio</span>
@@ -166,6 +162,26 @@
       <button class="preset-btn" data-preset="concert">
         <i data-lucide="music"></i>
         <span>Concert Hall</span>
+      </button>
+      <button class="preset-btn" data-preset="slowcore">
+        <i data-lucide="cloud-drizzle"></i>
+        <span>Slowcore</span>
+      </button>
+      <button class="preset-btn" data-preset="lofi">
+        <i data-lucide="coffee"></i>
+        <span>Lo-Fi</span>
+      </button>
+      <button class="preset-btn" data-preset="vaporwave">
+        <i data-lucide="sunset"></i>
+        <span>Vaporwave</span>
+      </button>
+      <button class="preset-btn" data-preset="phonecall">
+        <i data-lucide="phone"></i>
+        <span>Phone Call</span>
+      </button>
+      <button class="preset-btn" data-preset="underwater">
+        <i data-lucide="droplets"></i>
+        <span>Underwater</span>
       </button>
     </div>
   </div>
@@ -181,7 +197,7 @@
         </div>
         <span class="control-value" id="speedValue">1.0x</span>
       </div>
-      <input type="range" id="speedSlider" min="0.5" max="2" step="0.01" value="1">
+      <input type="range" id="speedSlider" min="0.25" max="2" step="0.01" value="1">
     </div>
 
     <div class="control-group glass-card">
@@ -276,24 +292,6 @@
         <input type="range" id="eightDSpeed" min="0.5" max="5" step="0.1" value="2">
         <span class="control-value" id="eightDSpeedValue">2.0</span>
       </div>
-    </div>
-
-    <div class="control-group glass-card toggle-card">
-      <div class="control-header">
-        <div class="control-label">
-          <i data-lucide="headphones"></i>
-          <span>3D Spatial Audio</span>
-        </div>
-        <div class="toggle" id="spatialToggle" role="switch" aria-checked="false" tabindex="0">
-          <div class="toggle-thumb"></div>
-        </div>
-      </div>
-      <div class="speed-control">
-        <label>Orbit Speed</label>
-        <input type="range" id="spatial3DSpeed" min="0.5" max="3" step="0.1" value="1">
-        <span class="control-value" id="spatial3DSpeedValue">1.0x</span>
-      </div>
-      <p class="speed-description">Sound orbits around you in 3D space</p>
     </div>
 
   </div>
