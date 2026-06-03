@@ -322,33 +322,29 @@ kbd {
 }
 #fileInput { display: none; }
 
+/* Upload icon — no circle, just the floating icon */
 .upload-icon-wrap {
   position: relative;
-  width: 80px; height: 80px;
+  width: auto;
+  height: auto;
   margin: 0 auto 24px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.upload-ring {
-  position: absolute; inset: 0;
-  border-radius: 50%;
-  border: 2px solid var(--accent);
-  opacity: 0.4;
-  animation: ringPulse 2.5s ease-in-out infinite;
-}
-@keyframes ringPulse {
-  0%,100% { transform: scale(1); opacity: 0.4; }
-  50%      { transform: scale(1.15); opacity: 0.1; }
-}
+
+/* Remove the ring entirely */
+.upload-ring { display: none; }
+
 .upload-icon-svg {
-  width: 36px; height: 36px;
+  width: 56px; height: 56px;
   color: var(--accent);
   animation: iconFloat 4s ease-in-out infinite;
+  filter: drop-shadow(0 0 18px var(--accent-glow));
 }
 @keyframes iconFloat {
   0%,100% { transform: translateY(0); }
-  50%      { transform: translateY(-8px); }
+  50%      { transform: translateY(-10px); }
 }
 .upload-section h2 {
   font-size: var(--text-lg);
