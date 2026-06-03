@@ -42,6 +42,7 @@ const resetBtn = document.getElementById('resetBtn');
 const downloadBtn = document.getElementById('downloadBtn');
 const progressBar = document.getElementById('progressBar');
 const progressFill = document.getElementById('progressFill');
+const progressThumb = document.getElementById('progressThumb');
 const currentTimeEl = document.getElementById('currentTime');
 const totalTimeEl = document.getElementById('totalTime');
 const fileNameEl = document.getElementById('fileName');
@@ -67,9 +68,44 @@ function getAdjustedDuration() {
     return audioBuffer.duration / getPlaybackRate();
 }
 
-function updateTotalTimeDisplay() {
+// ── Unified progress UI updater ───────────────────────────────────────────────
+// All progress/time display goes through this single function.
+// sourceTime = position in the original buffer (seconds).
+function syncProgressUI(sourceTime) {
     if (!audioBuffer) return;
-    totalTimeEl.textContent = formatTime(getAdjustedDuration());
+
+    if (sourceTime === undefined) {
+        sourceTime = getCurrentSourceTime();
+    }
+
+    const sourceDuration = audioBuffer.duration;
+    const ratio = sourceDuration > 0
+        ? Math.max(0, Math.min(1, sourceTime / sourceDuration))
+        : 0;
+
+    const pct = (ratio * 100).toFixed(4) + '%';
+
+    progressFill.style.width = pct;
+
+    if (progressThumb) {
+        progressThumb.style.left = pct;
+    }
+
+    const adjustedDuration = getAdjustedDuration();
+    const adjustedCurrentTime = ratio * adjustedDuration;
+    currentTimeEl.textContent = formatTime(adjustedCurrentTime);
+    totalTimeEl.textContent   = formatTime(adjustedDuration);
+}
+
+// Returns current position in the source buffer (seconds), accounting for
+// playback rate so wall-clock drift maps correctly.
+function getCurrentSourceTime() {
+    if (!audioBuffer) return 0;
+    if (isPlaying) {
+        const wallElapsed = audioContext.currentTime - startTime;
+        return Math.min(wallElapsed * currentPlaybackRate, audioBuffer.duration);
+    }
+    return Math.min(pauseTime, audioBuffer.duration);
 }
 
 // ── Pause without resetting position ─────────────────────────────────────────
@@ -125,28 +161,24 @@ async function loadAudioFile(file) {
     fileNameEl.textContent = currentFileName;
 
     try {
-        // Always create a fresh AudioContext so there's no leftover state
         if (audioContext) {
             try { await audioContext.close(); } catch(e){}
         }
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
         const arrayBuffer = await file.arrayBuffer();
-        // Decode into a clean buffer — original never mutated
         audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
         document.querySelectorAll('.player-section').forEach(el => el.classList.add('active'));
 
         initializeAudioNodes();
         drawWaveform();
-        updateTotalTimeDisplay();
 
         pauseTime = 0;
         startTime = 0;
         isPlaying = false;
         showPlayIcon();
-        progressFill.style.width = '0%';
-        currentTimeEl.textContent = '0:00';
+        syncProgressUI(0);
 
         console.log('✅ Audio loaded successfully');
     } catch (error) {
@@ -248,7 +280,6 @@ function play() {
     sourceNode = audioContext.createBufferSource();
     sourceNode.buffer = audioBuffer;
 
-    // Capture playback rate snapshot so progress bar uses the same value
     currentPlaybackRate = getPlaybackRate();
     sourceNode.playbackRate.value = currentPlaybackRate;
 
@@ -256,7 +287,6 @@ function play() {
 
     const offset = Math.min(pauseTime, audioBuffer.duration - 0.001);
     sourceNode.start(0, offset);
-    // startTime records the audioContext time corresponding to offset=0 in the source
     startTime = audioContext.currentTime - (offset / currentPlaybackRate);
     isPlaying = true;
 
@@ -273,10 +303,7 @@ function play() {
 
 function pause() {
     if (!isPlaying) return;
-    // Save position in SOURCE time (seconds of audio content played)
-    const wallElapsed = audioContext.currentTime - startTime;
-    pauseTime = wallElapsed * currentPlaybackRate;
-    pauseTime = Math.min(pauseTime, audioBuffer.duration);
+    pauseTime = getCurrentSourceTime();
     try { sourceNode.stop(); } catch(e){}
     isPlaying = false;
     showPlayIcon();
@@ -294,8 +321,7 @@ function stop() {
     pauseTime = 0;
     startTime = 0;
     showPlayIcon();
-    progressFill.style.width = '0%';
-    currentTimeEl.textContent = '0:00';
+    syncProgressUI(0);
     cancelAnimationFrame(progressRafId);
     cancelAnimationFrame(animationId);
     stopLevelMeter();
@@ -306,7 +332,6 @@ function stop() {
 // ====================================
 
 function connectAudioGraph() {
-    // source → preGain → bass → mid → treble → [pan] → gain
     sourceNode.connect(preGainNode);
     preGainNode.connect(bassFilter);
     bassFilter.connect(midFilter);
@@ -319,13 +344,11 @@ function connectAudioGraph() {
     }
     afterFilters.connect(gainNode);
 
-    // Echo (feedback delay) — safe feedback cap at 0.55
     gainNode.connect(delayNode);
     delayNode.connect(delayGain);
     delayGain.connect(delayNode);
     delayGain.connect(gainNode);
 
-    // Reverb
     const reverbValue = parseFloat(document.getElementById('reverbSlider').value) / 100;
     reverbDryGain.gain.value = 1 - reverbValue;
     reverbWetGain.gain.value = reverbValue * 0.6;
@@ -337,7 +360,6 @@ function connectAudioGraph() {
     convolverNode.connect(reverbWetGain);
     reverbWetGain.connect(merger);
 
-    // Limiter → output
     if (limiterEnabled) {
         merger.connect(compressorNode);
         compressorNode.connect(outputGainNode);
@@ -476,25 +498,17 @@ function visualize() {
 }
 
 // ====================================
-// PROGRESS BAR — rAF-based (fixes bug #1)
+// PROGRESS BAR — unified via syncProgressUI
 // ====================================
-// Progress is tracked in WALL-CLOCK time since startTime.
-// Wall-clock elapsed * currentPlaybackRate = audio content elapsed.
-// The progress bar fraction = contentElapsed / audioBuffer.duration.
 
 function scheduleProgressUpdate() {
     cancelAnimationFrame(progressRafId);
     if (!isPlaying || isDragging) return;
 
-    const wallElapsed = audioContext.currentTime - startTime;
-    const contentElapsed = wallElapsed * currentPlaybackRate;
-    const duration = audioBuffer.duration;
+    const src = getCurrentSourceTime();
+    syncProgressUI(src);
 
-    const pct = Math.min(1, contentElapsed / duration);
-    progressFill.style.width = (pct * 100) + '%';
-    currentTimeEl.textContent = formatTime(contentElapsed);
-
-    if (contentElapsed < duration) {
+    if (src < audioBuffer.duration) {
         progressRafId = requestAnimationFrame(scheduleProgressUpdate);
     }
 }
@@ -513,7 +527,7 @@ function startDragging(e) {
     if (!audioBuffer) return;
     isDragging = true;
     wasPausedBeforeDrag = !isPlaying;
-    if (isPlaying) { pauseWithoutReset(); }
+    if (isPlaying) pauseWithoutReset();
     progressBar.style.cursor = 'grabbing';
 }
 
@@ -521,10 +535,8 @@ function updateSeekPosition(clientX) {
     if (!audioBuffer || !isDragging) return;
     const rect = progressBar.getBoundingClientRect();
     const pct  = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const newContentTime = pct * audioBuffer.duration;
-    progressFill.style.width = (pct * 100) + '%';
-    currentTimeEl.textContent = formatTime(newContentTime);
-    pauseTime = newContentTime;
+    pauseTime = pct * audioBuffer.duration;
+    syncProgressUI(pauseTime);
 }
 
 function stopDragging() {
@@ -537,8 +549,8 @@ function stopDragging() {
 progressBar.addEventListener('click', (e) => {
     if (!audioBuffer || isDragging) return;
     const rect = progressBar.getBoundingClientRect();
-    const pct  = (e.clientX - rect.left) / rect.width;
-    const newContentTime = Math.max(0, Math.min(audioBuffer.duration, pct * audioBuffer.duration));
+    const pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const newSourceTime = pct * audioBuffer.duration;
     const wasPlaying = isPlaying;
     if (isPlaying) {
         try { sourceNode.stop(); } catch(e){}
@@ -548,9 +560,8 @@ progressBar.addEventListener('click', (e) => {
         cancelAnimationFrame(animationId);
         stopLevelMeter();
     }
-    pauseTime = newContentTime;
-    progressFill.style.width = (pct * 100) + '%';
-    currentTimeEl.textContent = formatTime(newContentTime);
+    pauseTime = newSourceTime;
+    syncProgressUI(pauseTime);
     if (wasPlaying) play();
 });
 
@@ -586,25 +597,36 @@ document.getElementById('limiterThresholdSlider').addEventListener('input', (e) 
 document.getElementById('speedSlider').addEventListener('input', (e) => {
     const value = parseFloat(e.target.value);
     document.getElementById('speedValue').textContent = value.toFixed(2) + 'x';
-    updateTotalTimeDisplay();
-    if (isPlaying && sourceNode) {
-        currentPlaybackRate = getPlaybackRate();
-        // Recalculate startTime so position stays consistent after rate change
-        const contentElapsed = (audioContext.currentTime - startTime) * sourceNode.playbackRate.value;
-        sourceNode.playbackRate.value = currentPlaybackRate;
-        startTime = audioContext.currentTime - (contentElapsed / currentPlaybackRate);
+
+    if (audioBuffer) {
+        if (isPlaying && sourceNode) {
+            // Capture current source position BEFORE changing rate
+            const currentSource = getCurrentSourceTime();
+            currentPlaybackRate = getPlaybackRate();
+            sourceNode.playbackRate.value = currentPlaybackRate;
+            // Recalibrate startTime so position stays correct
+            startTime = audioContext.currentTime - (currentSource / currentPlaybackRate);
+        } else {
+            currentPlaybackRate = getPlaybackRate();
+        }
+        syncProgressUI();
     }
 });
 
 document.getElementById('pitchSlider').addEventListener('input', (e) => {
     const value = parseFloat(e.target.value);
     document.getElementById('pitchValue').textContent = value.toFixed(1) + ' semitones';
-    updateTotalTimeDisplay();
-    if (isPlaying && sourceNode) {
-        currentPlaybackRate = getPlaybackRate();
-        const contentElapsed = (audioContext.currentTime - startTime) * sourceNode.playbackRate.value;
-        sourceNode.playbackRate.value = currentPlaybackRate;
-        startTime = audioContext.currentTime - (contentElapsed / currentPlaybackRate);
+
+    if (audioBuffer) {
+        if (isPlaying && sourceNode) {
+            const currentSource = getCurrentSourceTime();
+            currentPlaybackRate = getPlaybackRate();
+            sourceNode.playbackRate.value = currentPlaybackRate;
+            startTime = audioContext.currentTime - (currentSource / currentPlaybackRate);
+        } else {
+            currentPlaybackRate = getPlaybackRate();
+        }
+        syncProgressUI();
     }
 });
 
@@ -691,7 +713,6 @@ const presets = {
     deepbass:   { speed:0.90, pitch: -3, volume:110, bass:12, treble:-5, pan:0, reverb: 15, echo: 5, eightD:false, preGain:-15, outputGain:-3 },
     '8daudio':  { speed:1.00, pitch:  0, volume:100, bass: 3, treble: 2, pan:0, reverb: 25, echo:15, eightD:true,  preGain:-12, outputGain:-2 },
     concert:    { speed:1.00, pitch:  0, volume:105, bass: 8, treble: 4, pan:0, reverb: 60, echo:20, eightD:false, preGain:-15, outputGain:-3 },
-    // New presets
     slowcore:   { speed:0.72, pitch: -2, volume:100, bass: 4, treble:-2, pan:0, reverb: 65, echo:12, eightD:false, preGain:-12, outputGain:-2 },
     lofi:       { speed:0.92, pitch: -1, volume: 95, bass: 6, treble:-4, pan:0, reverb: 30, echo: 8, eightD:false, preGain:-12, outputGain:-2 },
     vaporwave:  { speed:0.80, pitch: -4, volume:100, bass: 5, treble: 0, pan:0, reverb: 50, echo:18, eightD:false, preGain:-12, outputGain:-2 },
@@ -743,15 +764,18 @@ function applyPreset(preset) {
     if (preset.eightD && !eightDEnabled)  eightDToggle.click();
     else if (!preset.eightD && eightDEnabled) eightDToggle.click();
 
-    updateTotalTimeDisplay();
-
-    if (isPlaying) {
-        // Save current position, restart with new settings
-        const wallElapsed   = audioContext.currentTime - startTime;
-        const savedContent  = wallElapsed * currentPlaybackRate;
-        stop();
-        pauseTime = Math.min(savedContent, audioBuffer.duration);
-        play();
+    if (audioBuffer) {
+        if (isPlaying) {
+            // Save source position before stopping
+            const savedSource = getCurrentSourceTime();
+            pauseWithoutReset();
+            currentPlaybackRate = getPlaybackRate();
+            pauseTime = savedSource;
+            play();
+        } else {
+            currentPlaybackRate = getPlaybackRate();
+            syncProgressUI();
+        }
     }
 }
 
@@ -783,7 +807,6 @@ downloadBtn.addEventListener('click', async () => {
 
         const offlineCtx    = new OfflineAudioContext(audioBuffer.numberOfChannels, newLength, audioContext.sampleRate);
         const offlineSource = offlineCtx.createBufferSource();
-        // Use the ORIGINAL audioBuffer — never the modified one (fixes quality degradation)
         offlineSource.buffer = audioBuffer;
         offlineSource.playbackRate.value = finalPlaybackRate;
 
@@ -838,7 +861,6 @@ downloadBtn.addEventListener('click', async () => {
         const offlineOutputGain = offlineCtx.createGain();
         offlineOutputGain.gain.value = dbToGain(parseFloat(document.getElementById('outputGainSlider').value));
 
-        // Chain
         offlineSource.connect(offlinePreGain);
         offlinePreGain.connect(offlineBass);
         offlineBass.connect(offlineMid);
@@ -866,7 +888,6 @@ downloadBtn.addEventListener('click', async () => {
         offlineSource.start();
         let renderedBuffer = await offlineCtx.startRendering();
 
-        // Normalise to -0.5 dBFS
         let maxPeak = 0;
         for (let ch = 0; ch < renderedBuffer.numberOfChannels; ch++) {
             const d = renderedBuffer.getChannelData(ch);
@@ -981,15 +1002,11 @@ document.addEventListener('keydown', (e) => {
 
 function seekRelative(seconds) {
     if (!audioBuffer) return;
-    const currentContent = isPlaying
-        ? (audioContext.currentTime - startTime) * currentPlaybackRate
-        : pauseTime;
-    const newTime = Math.max(0, Math.min(audioBuffer.duration, currentContent + seconds));
+    const newTime = Math.max(0, Math.min(audioBuffer.duration, getCurrentSourceTime() + seconds));
     const wasPlaying = isPlaying;
     if (isPlaying) pauseWithoutReset();
     pauseTime = newTime;
-    progressFill.style.width = ((newTime / audioBuffer.duration) * 100) + '%';
-    currentTimeEl.textContent = formatTime(newTime);
+    syncProgressUI(pauseTime);
     if (wasPlaying) play();
 }
 
@@ -999,8 +1016,7 @@ function seekTo(time) {
     const wasPlaying = isPlaying;
     if (isPlaying) pauseWithoutReset();
     pauseTime = newTime;
-    progressFill.style.width = ((newTime / audioBuffer.duration) * 100) + '%';
-    currentTimeEl.textContent = formatTime(newTime);
+    syncProgressUI(pauseTime);
     if (wasPlaying) play();
 }
 
@@ -1031,4 +1047,4 @@ function toggleMute() {
     }
 }
 
-console.log('🎵 Audio Editor v2 — all bugs fixed ✅');
+console.log('🎵 Audio Editor v2 — progress bar & seek bugs fixed ✅');
