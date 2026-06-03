@@ -67,12 +67,12 @@
       </summary>
       <div class="shortcuts-grid">
         <div class="shortcut-item"><kbd>Space</kbd><span>Play / Pause</span></div>
-        <div class="shortcut-item"><kbd>←</kbd><span>-5 seconds</span></div>
-        <div class="shortcut-item"><kbd>→</kbd><span>+5 seconds</span></div>
+        <div class="shortcut-item"><kbd>&#8592;</kbd><span>-5 seconds</span></div>
+        <div class="shortcut-item"><kbd>&#8594;</kbd><span>+5 seconds</span></div>
         <div class="shortcut-item"><kbd>J</kbd><span>-10 seconds</span></div>
         <div class="shortcut-item"><kbd>L</kbd><span>+10 seconds</span></div>
-        <div class="shortcut-item"><kbd>↑</kbd><span>Volume up</span></div>
-        <div class="shortcut-item"><kbd>↓</kbd><span>Volume down</span></div>
+        <div class="shortcut-item"><kbd>&#8593;</kbd><span>Volume up</span></div>
+        <div class="shortcut-item"><kbd>&#8595;</kbd><span>Volume down</span></div>
         <div class="shortcut-item"><kbd>M</kbd><span>Mute</span></div>
       </div>
     </details>
@@ -86,8 +86,8 @@
     </div>
     <h2>Drop your audio file here</h2>
     <p class="upload-hint">or click to browse</p>
-    <p class="upload-formats">MP3 · WAV · OGG · M4A · AAC · FLAC</p>
-    <button class="upload-btn glass-btn" onclick="document.getElementById('fileInput').value=''; document.getElementById('fileInput').click()">
+    <p class="upload-formats">MP3 &middot; WAV &middot; OGG &middot; M4A &middot; AAC &middot; FLAC</p>
+    <button class="upload-btn glass-btn" id="chooseFileBtn" onclick="event.stopPropagation(); fileInput.value=''; fileInput.click()">
       <i data-lucide="upload"></i> Choose File
     </button>
   </div>
@@ -97,7 +97,7 @@
     <div class="file-info">
       <i data-lucide="file-audio"></i>
       <span>Now playing: </span>
-      <span class="file-name" id="fileName">—</span>
+      <span class="file-name" id="fileName">&mdash;</span>
     </div>
 
     <div class="waveform-container">
