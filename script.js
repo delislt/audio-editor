@@ -69,8 +69,6 @@ function getAdjustedDuration() {
 }
 
 // ── Unified progress UI updater ───────────────────────────────────────────────
-// All progress/time display goes through this single function.
-// sourceTime = position in the original buffer (seconds).
 function syncProgressUI(sourceTime) {
     if (!audioBuffer) return;
 
@@ -97,8 +95,6 @@ function syncProgressUI(sourceTime) {
     totalTimeEl.textContent   = formatTime(adjustedDuration);
 }
 
-// Returns current position in the source buffer (seconds), accounting for
-// playback rate so wall-clock drift maps correctly.
 function getCurrentSourceTime() {
     if (!audioBuffer) return 0;
     if (isPlaying) {
@@ -498,7 +494,7 @@ function visualize() {
 }
 
 // ====================================
-// PROGRESS BAR — unified via syncProgressUI
+// PROGRESS BAR — seek on mousedown, drag to scrub
 // ====================================
 
 function scheduleProgressUpdate() {
@@ -516,53 +512,55 @@ function scheduleProgressUpdate() {
 let isDragging = false;
 let wasPausedBeforeDrag = false;
 
-progressBar.addEventListener('mousedown', startDragging);
-progressBar.addEventListener('touchstart', startDragging, { passive: true });
-document.addEventListener('mousemove',  (e) => { if (isDragging) updateSeekPosition(e.clientX); });
-document.addEventListener('touchmove',  (e) => { if (isDragging) updateSeekPosition(e.touches[0].clientX); }, { passive: true });
-document.addEventListener('mouseup',    stopDragging);
-document.addEventListener('touchend',   stopDragging);
-
-function startDragging(e) {
+// Central seek function used by both click and drag
+function seekToPosition(clientX) {
     if (!audioBuffer) return;
-    isDragging = true;
-    wasPausedBeforeDrag = !isPlaying;
-    if (isPlaying) pauseWithoutReset();
-    progressBar.style.cursor = 'grabbing';
-}
-
-function updateSeekPosition(clientX) {
-    if (!audioBuffer || !isDragging) return;
     const rect = progressBar.getBoundingClientRect();
     const pct  = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    pauseTime = pct * audioBuffer.duration;
+    pauseTime  = pct * audioBuffer.duration;
     syncProgressUI(pauseTime);
 }
 
-function stopDragging() {
+progressBar.addEventListener('mousedown', (e) => {
+    if (!audioBuffer) return;
+    isDragging = true;
+    wasPausedBeforeDrag = !isPlaying;
+
+    // Seek immediately on mousedown — this handles both click and drag start
+    if (isPlaying) pauseWithoutReset();
+    seekToPosition(e.clientX);
+
+    progressBar.style.cursor = 'grabbing';
+});
+
+progressBar.addEventListener('touchstart', (e) => {
+    if (!audioBuffer) return;
+    isDragging = true;
+    wasPausedBeforeDrag = !isPlaying;
+
+    if (isPlaying) pauseWithoutReset();
+    seekToPosition(e.touches[0].clientX);
+}, { passive: true });
+
+document.addEventListener('mousemove', (e) => {
+    if (isDragging) seekToPosition(e.clientX);
+});
+
+document.addEventListener('touchmove', (e) => {
+    if (isDragging) seekToPosition(e.touches[0].clientX);
+}, { passive: true });
+
+document.addEventListener('mouseup', () => {
     if (!isDragging) return;
     isDragging = false;
     progressBar.style.cursor = 'pointer';
     if (!wasPausedBeforeDrag) play();
-}
+});
 
-progressBar.addEventListener('click', (e) => {
-    if (!audioBuffer || isDragging) return;
-    const rect = progressBar.getBoundingClientRect();
-    const pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const newSourceTime = pct * audioBuffer.duration;
-    const wasPlaying = isPlaying;
-    if (isPlaying) {
-        try { sourceNode.stop(); } catch(e){}
-        sourceNode.disconnect();
-        isPlaying = false;
-        cancelAnimationFrame(progressRafId);
-        cancelAnimationFrame(animationId);
-        stopLevelMeter();
-    }
-    pauseTime = newSourceTime;
-    syncProgressUI(pauseTime);
-    if (wasPlaying) play();
+document.addEventListener('touchend', () => {
+    if (!isDragging) return;
+    isDragging = false;
+    if (!wasPausedBeforeDrag) play();
 });
 
 // ====================================
@@ -600,11 +598,9 @@ document.getElementById('speedSlider').addEventListener('input', (e) => {
 
     if (audioBuffer) {
         if (isPlaying && sourceNode) {
-            // Capture current source position BEFORE changing rate
             const currentSource = getCurrentSourceTime();
             currentPlaybackRate = getPlaybackRate();
             sourceNode.playbackRate.value = currentPlaybackRate;
-            // Recalibrate startTime so position stays correct
             startTime = audioContext.currentTime - (currentSource / currentPlaybackRate);
         } else {
             currentPlaybackRate = getPlaybackRate();
@@ -766,7 +762,6 @@ function applyPreset(preset) {
 
     if (audioBuffer) {
         if (isPlaying) {
-            // Save source position before stopping
             const savedSource = getCurrentSourceTime();
             pauseWithoutReset();
             currentPlaybackRate = getPlaybackRate();
@@ -1047,4 +1042,4 @@ function toggleMute() {
     }
 }
 
-console.log('🎵 Audio Editor v2 — progress bar & seek bugs fixed ✅');
+console.log('🎵 Audio Editor — progress bar seek-on-mousedown ✅');
