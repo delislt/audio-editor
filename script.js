@@ -1,12 +1,13 @@
 // ============================================================
 // Audio Editor — script.js
-// Pitch shift via AudioBufferSourceNode.detune (nativo W3C)
-// Speed via AudioBufferSourceNode.playbackRate
-// Os dois são completamente independentes por spec.
+// Pitch shift: OfflineAudioContext resample (sem worklet)
+// Speed: sourceNode.playbackRate
+// Completamente independentes, sem artefatos.
 // ============================================================
 
 let audioContext;
-let audioBuffer;
+let audioBuffer;        // buffer original decodificado
+let pitchedBuffer;      // buffer com pitch aplicado (resampleado)
 let sourceNode;
 let analyser;
 let preGainNode;
@@ -37,6 +38,7 @@ let clipCount = 0;
 let peakHold = 0;
 let peakHoldTime = 0;
 let currentPlaybackRate = 1.0;
+let pitchBuildPending = false; // evita reconstrução em cascata
 
 // DOM Elements
 const uploadSection  = document.getElementById('uploadSection');
@@ -61,43 +63,60 @@ function showPlayIcon()  { playIcon.style.display = ''; pauseIcon.style.display 
 function showPauseIcon() { playIcon.style.display = 'none'; pauseIcon.style.display = ''; }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function getPlaybackRate() {
-    return parseFloat(document.getElementById('speedSlider').value);
-}
-// Pitch em cents (100 cents = 1 semitom)
-// AudioBufferSourceNode.detune é independente de playbackRate por spec W3C
-function getPitchCents() {
-    return parseFloat(document.getElementById('pitchSlider').value) * 100;
-}
+function getSpeedValue()   { return parseFloat(document.getElementById('speedSlider').value); }
+function getPitchSemitones() { return parseFloat(document.getElementById('pitchSlider').value); }
+function getPitchRatio()   { return Math.pow(2, getPitchSemitones() / 12); }
+
+// duração ajustada pela VELOCIDADE (pitch não altera duração — ver buildPitchedBuffer)
 function getAdjustedDuration() {
-    if (!audioBuffer) return 0;
-    return audioBuffer.duration / getPlaybackRate();
+    if (!pitchedBuffer) return 0;
+    return pitchedBuffer.duration / getSpeedValue();
+}
+
+// ── Pitch via resample offline ────────────────────────────────────────────────
+// Técnica: toca o buffer original com playbackRate = pitchRatio num OfflineAudioContext
+// cujo tamanho é original.length/pitchRatio samples → o resultado tem duração IGUAL
+// ao original mas com as frequências transpostas. Sem mexer na velocidade.
+async function buildPitchedBuffer() {
+    if (!audioBuffer || !audioContext) return;
+    const ratio   = getPitchRatio();
+    const sr      = audioContext.sampleRate;
+    const nCh     = audioBuffer.numberOfChannels;
+    // comprimento do buffer de saída = duração original em samples
+    const outLen  = Math.ceil(audioBuffer.length / ratio);
+    const offCtx  = new OfflineAudioContext(nCh, outLen, sr);
+    const src     = offCtx.createBufferSource();
+    src.buffer    = audioBuffer;
+    src.playbackRate.value = ratio;   // transpõe pitch
+    src.connect(offCtx.destination);
+    src.start(0);
+    pitchedBuffer = await offCtx.startRendering();
 }
 
 // ── Progress UI ───────────────────────────────────────────────────────────────
 function syncProgressUI(sourceTime) {
-    if (!audioBuffer) return;
+    if (!pitchedBuffer) return;
     if (sourceTime === undefined) sourceTime = getCurrentSourceTime();
-    const sourceDuration = audioBuffer.duration;
-    const ratio = sourceDuration > 0 ? Math.max(0, Math.min(1, sourceTime / sourceDuration)) : 0;
-    const pct = (ratio * 100).toFixed(4) + '%';
+    const dur   = pitchedBuffer.duration;
+    const ratio = dur > 0 ? Math.max(0, Math.min(1, sourceTime / dur)) : 0;
+    const pct   = (ratio * 100).toFixed(4) + '%';
     progressFill.style.width = pct;
     if (progressThumb) progressThumb.style.left = pct;
-    const adjustedDuration    = getAdjustedDuration();
-    currentTimeEl.textContent = formatTime(ratio * adjustedDuration);
-    totalTimeEl.textContent   = formatTime(adjustedDuration);
+    const adjDur = getAdjustedDuration();
+    currentTimeEl.textContent = formatTime(ratio * adjDur);
+    totalTimeEl.textContent   = formatTime(adjDur);
 }
 
 function getCurrentSourceTime() {
-    if (!audioBuffer) return 0;
+    if (!pitchedBuffer) return 0;
     if (isPlaying) {
-        const wallElapsed = audioContext.currentTime - startTime;
-        return Math.min(wallElapsed * currentPlaybackRate, audioBuffer.duration);
+        const wall = audioContext.currentTime - startTime;
+        return Math.min(wall * currentPlaybackRate, pitchedBuffer.duration);
     }
-    return Math.min(pauseTime, audioBuffer.duration);
+    return Math.min(pauseTime, pitchedBuffer.duration);
 }
 
-// ── Disconnect all nodes ──────────────────────────────────────────────────────
+// ── Disconnect ────────────────────────────────────────────────────────────────
 function disconnectAudioGraph() {
     [
         preGainNode, bassFilter, midFilter, trebleFilter, panNode,
@@ -142,6 +161,8 @@ async function loadAudioFile(file) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const arrayBuffer = await file.arrayBuffer();
         audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        // Constrói buffer com pitch inicial (0 semitones = ratio 1 = cópia direta)
+        await buildPitchedBuffer();
         document.querySelectorAll('.player-section').forEach(el => el.classList.add('active'));
         initializeAudioNodes();
         drawWaveform();
@@ -218,23 +239,20 @@ function createReverbImpulse(duration, decay) {
 // PLAYBACK
 // ====================================
 function play() {
-    if (!audioBuffer) return;
+    if (!pitchedBuffer) return;
     if (isPlaying) { pause(); return; }
     if (audioContext.state === 'suspended') audioContext.resume();
 
     sourceNode = audioContext.createBufferSource();
-    sourceNode.buffer = audioBuffer;
+    sourceNode.buffer = pitchedBuffer;  // buffer já com pitch aplicado
 
-    // Speed: apenas o playbackRate
-    currentPlaybackRate = getPlaybackRate();
+    // Apenas a velocidade no playbackRate — pitch já está no buffer
+    currentPlaybackRate = getSpeedValue();
     sourceNode.playbackRate.value = currentPlaybackRate;
-
-    // Pitch: detune em cents — completamente independente do playbackRate
-    sourceNode.detune.value = getPitchCents();
 
     connectAudioGraph();
 
-    const offset = Math.min(pauseTime, audioBuffer.duration - 0.001);
+    const offset = Math.min(pauseTime, pitchedBuffer.duration - 0.001);
     sourceNode.start(0, offset);
     startTime = audioContext.currentTime - (offset / currentPlaybackRate);
     isPlaying = true;
@@ -273,32 +291,23 @@ function stop() {
 // ====================================
 function connectAudioGraph() {
     disconnectAudioGraph();
-
-    // source → preGain → bass → mid → treble
     sourceNode.connect(preGainNode);
     preGainNode.connect(bassFilter);
     bassFilter.connect(midFilter);
     midFilter.connect(trebleFilter);
-
     let last = trebleFilter;
     if (panNode) { last.connect(panNode); last = panNode; }
     last.connect(gainNode);
-
-    // Delay
     gainNode.connect(delayNode);
     delayNode.connect(delayGain);
     delayGain.connect(delayNode);
     delayGain.connect(gainNode);
-
-    // Reverb
     const reverbValue = parseFloat(document.getElementById('reverbSlider').value) / 100;
     reverbDryGain.gain.value = 1 - reverbValue;
     reverbWetGain.gain.value = reverbValue * 0.6;
-
     mergerNode = audioContext.createGain();
     gainNode.connect(reverbDryGain); reverbDryGain.connect(mergerNode);
     gainNode.connect(convolverNode); convolverNode.connect(reverbWetGain); reverbWetGain.connect(mergerNode);
-
     if (limiterEnabled) {
         mergerNode.connect(compressorNode); compressorNode.connect(outputGainNode);
     } else {
@@ -319,18 +328,14 @@ function startLevelMeter() {
     const rmsValueEl    = document.getElementById('rmsValue');
     const bufLen        = analyser.frequencyBinCount;
     const data          = new Float32Array(bufLen);
-
     meterInterval = setInterval(() => {
         analyser.getFloatTimeDomainData(data);
         let sumSq = 0, peak = 0;
         for (let i = 0; i < bufLen; i++) {
-            const s = Math.abs(data[i]);
-            sumSq += data[i] * data[i];
-            if (s > peak) peak = s;
+            const s = Math.abs(data[i]); sumSq += data[i] * data[i]; if (s > peak) peak = s;
         }
         const rms = Math.sqrt(sumSq / bufLen);
-        const rmsDb  = gainToDb(rms);
-        const peakDb = gainToDb(peak);
+        const rmsDb  = gainToDb(rms), peakDb = gainToDb(peak);
         const rmsPct = Math.max(0, Math.min(100, ((rmsDb + 60) / 60) * 100));
         if (meterFill)   meterFill.style.width = rmsPct + '%';
         if (rmsValueEl)  rmsValueEl.textContent = rmsDb.toFixed(1) + ' dB';
@@ -347,13 +352,9 @@ function startLevelMeter() {
                 const nv  = Math.max(-12, cur - 1);
                 document.getElementById('outputGainSlider').value = nv;
                 document.getElementById('outputGainValue').textContent = nv.toFixed(1) + ' dB';
-                outputGainNode.gain.value = dbToGain(nv);
-                clipCount = 0;
+                outputGainNode.gain.value = dbToGain(nv); clipCount = 0;
             }
-        } else {
-            if (clipIndicator) clipIndicator.classList.remove('active');
-            if (clipCount > 0) clipCount--;
-        }
+        } else { if (clipIndicator) clipIndicator.classList.remove('active'); if (clipCount > 0) clipCount--; }
     }, 50);
 }
 
@@ -361,10 +362,8 @@ function stopLevelMeter() {
     if (meterInterval) { clearInterval(meterInterval); meterInterval = null; }
     const ids = ['meterFill','meterPeak','peakValue','rmsValue','clipIndicator'];
     const [mf, mp, pv, rv, ci] = ids.map(id => document.getElementById(id));
-    if (mf) mf.style.width = '0%';
-    if (mp) mp.style.left  = '0%';
-    if (pv) pv.textContent = '-∞ dB';
-    if (rv) rv.textContent = '-∞ dB';
+    if (mf) mf.style.width = '0%'; if (mp) mp.style.left = '0%';
+    if (pv) pv.textContent = '-∞ dB'; if (rv) rv.textContent = '-∞ dB';
     if (ci) ci.classList.remove('active');
 }
 
@@ -375,8 +374,7 @@ function drawWaveform() {
     const w = waveformCanvas.width  = waveformCanvas.offsetWidth  * 2;
     const h = waveformCanvas.height = waveformCanvas.offsetHeight * 2;
     const data = audioBuffer.getChannelData(0);
-    const step = Math.ceil(data.length / w);
-    const amp  = h / 2;
+    const step = Math.ceil(data.length / w), amp = h / 2;
     waveformCtx.fillStyle = 'rgba(15,15,30,1)';
     waveformCtx.fillRect(0, 0, w, h);
     waveformCtx.beginPath();
@@ -421,26 +419,27 @@ function scheduleProgressUpdate() {
     if (!isPlaying || isDragging) return;
     const src = getCurrentSourceTime();
     syncProgressUI(src);
-    if (src < audioBuffer.duration) progressRafId = requestAnimationFrame(scheduleProgressUpdate);
+    if (pitchedBuffer && src < pitchedBuffer.duration)
+        progressRafId = requestAnimationFrame(scheduleProgressUpdate);
 }
 
 let isDragging = false, wasPausedBeforeDrag = false;
 
 function seekToPosition(clientX) {
-    if (!audioBuffer) return;
+    if (!pitchedBuffer) return;
     const rect = progressBar.getBoundingClientRect();
-    pauseTime = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * audioBuffer.duration;
+    pauseTime = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * pitchedBuffer.duration;
     syncProgressUI(pauseTime);
 }
 
 progressBar.addEventListener('mousedown', e => {
-    if (!audioBuffer) return;
+    if (!pitchedBuffer) return;
     isDragging = true; wasPausedBeforeDrag = !isPlaying;
     if (isPlaying) pauseWithoutReset();
     seekToPosition(e.clientX); progressBar.style.cursor = 'grabbing';
 });
 progressBar.addEventListener('touchstart', e => {
-    if (!audioBuffer) return;
+    if (!pitchedBuffer) return;
     isDragging = true; wasPausedBeforeDrag = !isPlaying;
     if (isPlaying) pauseWithoutReset();
     seekToPosition(e.touches[0].clientX);
@@ -481,27 +480,36 @@ document.getElementById('limiterThresholdSlider').addEventListener('input', e =>
 document.getElementById('speedSlider').addEventListener('input', e => {
     const v = parseFloat(e.target.value);
     document.getElementById('speedValue').textContent = v.toFixed(2) + 'x';
-    if (audioBuffer) {
+    if (pitchedBuffer) {
         if (isPlaying && sourceNode) {
             const cur = getCurrentSourceTime();
-            currentPlaybackRate = getPlaybackRate();
+            currentPlaybackRate = getSpeedValue();
             sourceNode.playbackRate.value = currentPlaybackRate;
             startTime = audioContext.currentTime - (cur / currentPlaybackRate);
         } else {
-            currentPlaybackRate = getPlaybackRate();
+            currentPlaybackRate = getSpeedValue();
         }
         syncProgressUI();
     }
 });
 
+// Pitch: rebuild buffer e reinicia a reprodução na mesma posição
+let pitchDebounceTimer = null;
 document.getElementById('pitchSlider').addEventListener('input', e => {
     const v = parseFloat(e.target.value);
     document.getElementById('pitchValue').textContent = v.toFixed(1) + ' semitones';
-    // Atualiza detune em tempo real sem reiniciar a reprodução
-    if (sourceNode && isPlaying) {
-        sourceNode.detune.value = getPitchCents();
-    }
-    syncProgressUI();
+    // Debounce: espera 300ms sem mover o slider para reconstruir
+    clearTimeout(pitchDebounceTimer);
+    pitchDebounceTimer = setTimeout(async () => {
+        if (!audioBuffer) return;
+        const wasPlaying = isPlaying;
+        const savedTime  = getCurrentSourceTime();
+        if (isPlaying) pauseWithoutReset();
+        await buildPitchedBuffer();
+        pauseTime = savedTime;
+        syncProgressUI(savedTime);
+        if (wasPlaying) play();
+    }, 300);
 });
 
 document.getElementById('volumeSlider').addEventListener('input', e => {
@@ -592,7 +600,7 @@ document.querySelectorAll('.preset-btn').forEach(btn => {
     btn.addEventListener('click', () => { const p = presets[btn.dataset.preset]; if (p) applyPreset(p); });
 });
 
-function applyPreset(p) {
+async function applyPreset(p) {
     document.getElementById('speedSlider').value   = p.speed;
     document.getElementById('speedValue').textContent  = p.speed.toFixed(2) + 'x';
     document.getElementById('pitchSlider').value   = p.pitch;
@@ -626,20 +634,19 @@ function applyPreset(p) {
     if (reverbWetGain)  reverbWetGain.gain.value  = wet * 0.6;
     if (convolverNode)  createReverbImpulse(2, Math.max(0.001, p.reverb / 20));
 
-    if (p.eightD && !eightDEnabled)   eightDToggle.click();
+    if (p.eightD && !eightDEnabled)      eightDToggle.click();
     else if (!p.eightD && eightDEnabled) eightDToggle.click();
 
     if (audioBuffer) {
-        if (isPlaying) {
-            const saved = getCurrentSourceTime();
-            pauseWithoutReset();
-            currentPlaybackRate = getPlaybackRate();
-            pauseTime = saved;
-            play();
-        } else {
-            currentPlaybackRate = getPlaybackRate();
-            syncProgressUI();
-        }
+        const wasPlaying = isPlaying;
+        const savedTime  = getCurrentSourceTime();
+        if (isPlaying) pauseWithoutReset();
+        await buildPitchedBuffer();
+        currentPlaybackRate = getSpeedValue();
+        pauseTime = savedTime;
+        syncProgressUI(savedTime);
+        if (wasPlaying) play();
+        else syncProgressUI();
     }
 }
 
@@ -661,13 +668,25 @@ downloadBtn.addEventListener('click', async () => {
 
         const pitchSemitones = parseFloat(document.getElementById('pitchSlider').value);
         const speed          = parseFloat(document.getElementById('speedSlider').value);
-        const newLength      = Math.ceil((audioBuffer.duration / speed) * audioContext.sampleRate);
+        // Tamanho final = duração_com_pitch / velocidade
+        const pitchRatio  = Math.pow(2, pitchSemitones / 12);
+        const pitchedLen  = Math.ceil(audioBuffer.length / pitchRatio);
+        const finalLen    = Math.ceil(pitchedLen / speed);
 
-        const offlineCtx    = new OfflineAudioContext(2, newLength, audioContext.sampleRate);
-        const offlineSrc    = offlineCtx.createBufferSource();
-        offlineSrc.buffer   = audioBuffer;
+        // Passo 1: aplica pitch
+        const pitchCtx  = new OfflineAudioContext(audioBuffer.numberOfChannels, pitchedLen, audioContext.sampleRate);
+        const pitchSrc  = pitchCtx.createBufferSource();
+        pitchSrc.buffer = audioBuffer;
+        pitchSrc.playbackRate.value = pitchRatio;
+        pitchSrc.connect(pitchCtx.destination);
+        pitchSrc.start(0);
+        const pitchedOut = await pitchCtx.startRendering();
+
+        // Passo 2: aplica velocidade + efeitos
+        const offlineCtx = new OfflineAudioContext(2, finalLen, audioContext.sampleRate);
+        const offlineSrc = offlineCtx.createBufferSource();
+        offlineSrc.buffer = pitchedOut;
         offlineSrc.playbackRate.value = speed;
-        offlineSrc.detune.value       = pitchSemitones * 100; // cents
 
         const offlinePreGain = offlineCtx.createGain();
         offlinePreGain.gain.value = dbToGain(parseFloat(document.getElementById('preGainSlider').value));
@@ -677,8 +696,7 @@ downloadBtn.addEventListener('click', async () => {
         offlineBass.gain.value = parseFloat(document.getElementById('bassSlider').value);
 
         const offlineMid = offlineCtx.createBiquadFilter();
-        offlineMid.type = 'peaking'; offlineMid.frequency.value = 1000; offlineMid.Q.value = 0.8;
-        offlineMid.gain.value = 0;
+        offlineMid.type = 'peaking'; offlineMid.frequency.value = 1000; offlineMid.Q.value = 0.8; offlineMid.gain.value = 0;
 
         const offlineTreble = offlineCtx.createBiquadFilter();
         offlineTreble.type = 'highshelf'; offlineTreble.frequency.value = 3000;
@@ -701,19 +719,18 @@ downloadBtn.addEventListener('click', async () => {
         const reverbValue     = parseFloat(document.getElementById('reverbSlider').value) / 100;
         offlineRevDry.gain.value = 1 - reverbValue;
         offlineRevWet.gain.value = reverbValue * 0.6;
-        const revLen    = offlineCtx.sampleRate * 2;
+        const revLen = offlineCtx.sampleRate * 2;
         const revImpulse = offlineCtx.createBuffer(2, revLen, offlineCtx.sampleRate);
-        const decayVal  = Math.max(0.001, reverbValue * 20);
+        const decayVal = Math.max(0.001, reverbValue * 20);
         for (let ch = 0; ch < 2; ch++) {
             const d = revImpulse.getChannelData(ch);
-            for (let i = 0; i < revLen; i++)
-                d[i] = (Math.random() * 2 - 1) * Math.pow((revLen - i) / revLen, decayVal);
+            for (let i = 0; i < revLen; i++) d[i] = (Math.random() * 2 - 1) * Math.pow((revLen - i) / revLen, decayVal);
         }
         offlineConvolver.buffer = revImpulse;
 
         const offlineComp = offlineCtx.createDynamicsCompressor();
         offlineComp.threshold.value = -3; offlineComp.knee.value = 6;
-        offlineComp.ratio.value = 12;     offlineComp.attack.value = 0.003; offlineComp.release.value = 0.25;
+        offlineComp.ratio.value = 12; offlineComp.attack.value = 0.003; offlineComp.release.value = 0.25;
 
         const offlineOut = offlineCtx.createGain();
         offlineOut.gain.value = dbToGain(parseFloat(document.getElementById('outputGainSlider').value));
@@ -797,10 +814,6 @@ function audioBufferToWav(buffer) {
     return ab;
 }
 
-function writeString(view, offset, string) {
-    for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
-}
-
 // ====================================
 // UTILS
 // ====================================
@@ -820,7 +833,7 @@ waveformCanvas.height = waveformCanvas.offsetHeight * 2;
 // KEYBOARD SHORTCUTS
 // ====================================
 document.addEventListener('keydown', e => {
-    if (!audioBuffer) return;
+    if (!pitchedBuffer) return;
     const tag  = e.target.tagName.toLowerCase();
     const type = (e.target.type || '').toLowerCase();
     if (tag === 'textarea') return;
@@ -833,7 +846,7 @@ document.addEventListener('keydown', e => {
         case 'j': case 'J': e.preventDefault(); seekRelative(-10); break;
         case 'l': case 'L': e.preventDefault(); seekRelative(10);  break;
         case 'Home': e.preventDefault(); seekTo(0); break;
-        case 'End':  e.preventDefault(); seekTo(audioBuffer.duration); break;
+        case 'End':  e.preventDefault(); seekTo(pitchedBuffer.duration); break;
         case 'ArrowUp':   e.preventDefault(); changeVolume(5);  break;
         case 'ArrowDown': e.preventDefault(); changeVolume(-5); break;
         case 'm': case 'M': e.preventDefault(); toggleMute(); break;
@@ -841,16 +854,16 @@ document.addEventListener('keydown', e => {
 });
 
 function seekRelative(s) {
-    if (!audioBuffer) return;
-    const newTime = Math.max(0, Math.min(audioBuffer.duration, getCurrentSourceTime() + s));
+    if (!pitchedBuffer) return;
+    const newTime = Math.max(0, Math.min(pitchedBuffer.duration, getCurrentSourceTime() + s));
     const was = isPlaying;
     if (isPlaying) pauseWithoutReset();
     pauseTime = newTime; syncProgressUI(pauseTime);
     if (was) play();
 }
 function seekTo(t) {
-    if (!audioBuffer) return;
-    const newTime = Math.max(0, Math.min(audioBuffer.duration, t));
+    if (!pitchedBuffer) return;
+    const newTime = Math.max(0, Math.min(pitchedBuffer.duration, t));
     const was = isPlaying;
     if (isPlaying) pauseWithoutReset();
     pauseTime = newTime; syncProgressUI(pauseTime);
@@ -878,4 +891,4 @@ function toggleMute() {
     }
 }
 
-console.log('🎵 Audio Editor — pitch via detune nativo (W3C Web Audio API) ✅');
+console.log('🎵 Audio Editor — pitch via OfflineAudioContext resample ✅');
