@@ -16,7 +16,10 @@ let reverbDryGain;
 let reverbWetGain;
 let delayNode;
 let delayGain;
-let mergerNode; // FIX: stored so it can be disconnected
+let mergerNode;
+// PITCH SHIFT INDEPENDENTE: AudioWorkletNode com phase vocoder
+let pitchShifterNode = null;
+let pitchWorkletReady = false;
 let isPlaying = false;
 let startTime = 0;
 let pauseTime = 0;
@@ -30,7 +33,7 @@ let currentFileName = '';
 let clipCount = 0;
 let peakHold = 0;
 let peakHoldTime = 0;
-// playbackRate currently in use (set once on play, kept in sync)
+// playbackRate para APENAS o speed slider (pitch é separado via worklet)
 let currentPlaybackRate = 1.0;
 
 // DOM Elements
@@ -57,15 +60,21 @@ const pauseIcon = document.getElementById('pauseIcon');
 function showPlayIcon()  { playIcon.style.display = ''; pauseIcon.style.display = 'none'; }
 function showPauseIcon() { playIcon.style.display = 'none'; pauseIcon.style.display = ''; }
 
-// ── Adjusted duration based on playbackRate ──────────────────────────────────
+// ── Speed-only playback rate (pitch desacoplado) ──────────────────────────────
 function getPlaybackRate() {
-    const pitchShift = parseFloat(document.getElementById('pitchSlider').value);
-    const speed = parseFloat(document.getElementById('speedSlider').value);
-    return speed * Math.pow(2, pitchShift / 12);
+    // Apenas o speed slider — pitch NÃO afeta mais o playbackRate
+    return parseFloat(document.getElementById('speedSlider').value);
+}
+
+// Razão de transposição de pitch para o phase vocoder
+function getPitchRatio() {
+    const semitones = parseFloat(document.getElementById('pitchSlider').value);
+    return Math.pow(2, semitones / 12);
 }
 
 function getAdjustedDuration() {
     if (!audioBuffer) return 0;
+    // Duração reflete apenas a velocidade; pitch não altera duração
     return audioBuffer.duration / getPlaybackRate();
 }
 
@@ -83,12 +92,8 @@ function syncProgressUI(sourceTime) {
         : 0;
 
     const pct = (ratio * 100).toFixed(4) + '%';
-
     progressFill.style.width = pct;
-
-    if (progressThumb) {
-        progressThumb.style.left = pct;
-    }
+    if (progressThumb) progressThumb.style.left = pct;
 
     const adjustedDuration = getAdjustedDuration();
     const adjustedCurrentTime = ratio * adjustedDuration;
@@ -106,23 +111,17 @@ function getCurrentSourceTime() {
 }
 
 // ====================================
-// AUDIO GRAPH — DISCONNECT (FIX)
+// AUDIO GRAPH — DISCONNECT
 // ====================================
-// FIX: desconecta todos os nós persistentes do grafo antes de reconectar.
-// Sem isso, cada chamada a connectAudioGraph() empilhava novas conexões
-// sobre as existentes, criando múltiplas rotas paralelas que amplificavam
-// progressivamente o volume e acumulavam nós na memória.
 function disconnectAudioGraph() {
     const nodes = [
         preGainNode, bassFilter, midFilter, trebleFilter,
-        panNode, gainNode, delayNode, delayGain,
+        panNode, pitchShifterNode, gainNode, delayNode, delayGain,
         reverbDryGain, reverbWetGain, convolverNode,
         mergerNode, compressorNode, outputGainNode, analyser,
     ];
     nodes.forEach(node => {
-        if (node) {
-            try { node.disconnect(); } catch (e) { /* já desconectado */ }
-        }
+        if (node) { try { node.disconnect(); } catch (e) {} }
     });
     mergerNode = null;
 }
@@ -133,7 +132,7 @@ function pauseWithoutReset() {
         try { sourceNode.stop(); } catch(e){}
         try { sourceNode.disconnect(); } catch(e){}
     }
-    disconnectAudioGraph(); // FIX: libera grafo ao pausar
+    disconnectAudioGraph();
     isPlaying = false;
     showPlayIcon();
     cancelAnimationFrame(progressRafId);
@@ -185,6 +184,17 @@ async function loadAudioFile(file) {
             try { await audioContext.close(); } catch(e){}
         }
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+        // Registra o AudioWorklet para pitch shifting independente
+        pitchWorkletReady = false;
+        pitchShifterNode = null;
+        try {
+            await audioContext.audioWorklet.addModule('./pitch-shifter-processor.js');
+            pitchWorkletReady = true;
+            console.log('✅ PitchShifterWorklet carregado');
+        } catch (err) {
+            console.warn('⚠️ AudioWorklet não disponível, pitch usará fallback (playbackRate):', err);
+        }
 
         const arrayBuffer = await file.arrayBuffer();
         audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
@@ -264,7 +274,22 @@ function initializeAudioNodes() {
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.8;
 
-    mergerNode = null; // será criado em connectAudioGraph()
+    // Cria o nó de pitch shift se o worklet estiver disponível
+    if (pitchWorkletReady) {
+        pitchShifterNode = new AudioWorkletNode(audioContext, 'pitch-shifter-processor', {
+            numberOfInputs: 1,
+            numberOfOutputs: 1,
+            outputChannelCount: [2],
+        });
+        // Aplica o pitchRatio atual
+        const ratio = getPitchRatio();
+        pitchShifterNode.parameters.get('pitchRatio').value = ratio;
+        console.log('🎵 PitchShifterNode criado, ratio:', ratio);
+    } else {
+        pitchShifterNode = null;
+    }
+
+    mergerNode = null;
 }
 
 // ====================================
@@ -302,8 +327,14 @@ function play() {
     sourceNode = audioContext.createBufferSource();
     sourceNode.buffer = audioBuffer;
 
+    // APENAS speed no playbackRate — pitch é tratado pelo phase vocoder
     currentPlaybackRate = getPlaybackRate();
     sourceNode.playbackRate.value = currentPlaybackRate;
+
+    // Garante que o pitchShifterNode tem o ratio correto
+    if (pitchShifterNode) {
+        pitchShifterNode.parameters.get('pitchRatio').value = getPitchRatio();
+    }
 
     connectAudioGraph();
 
@@ -327,7 +358,7 @@ function pause() {
     if (!isPlaying) return;
     pauseTime = getCurrentSourceTime();
     try { sourceNode.stop(); } catch(e){}
-    disconnectAudioGraph(); // FIX: libera grafo ao pausar normalmente
+    disconnectAudioGraph();
     isPlaying = false;
     showPlayIcon();
     cancelAnimationFrame(progressRafId);
@@ -340,7 +371,7 @@ function stop() {
         try { sourceNode.stop(); } catch(e){}
         try { sourceNode.disconnect(); } catch(e){}
     }
-    disconnectAudioGraph(); // FIX: libera grafo ao parar
+    disconnectAudioGraph();
     isPlaying = false;
     pauseTime = 0;
     startTime = 0;
@@ -356,31 +387,40 @@ function stop() {
 // ====================================
 
 function connectAudioGraph() {
-    // FIX: desconecta tudo antes de reconectar para evitar conexões duplicadas
     disconnectAudioGraph();
 
+    // source → preGain → EQ (bass/mid/treble)
     sourceNode.connect(preGainNode);
     preGainNode.connect(bassFilter);
     bassFilter.connect(midFilter);
     midFilter.connect(trebleFilter);
 
-    let afterFilters = trebleFilter;
-    if (panNode) {
-        afterFilters.connect(panNode);
-        afterFilters = panNode;
-    }
-    afterFilters.connect(gainNode);
+    // Depois do EQ: insere o pitch shifter (se disponível), depois pan, depois gain
+    let afterEQ = trebleFilter;
 
+    if (pitchShifterNode) {
+        // trebleFilter → pitchShifter → (pan?) → gainNode
+        afterEQ.connect(pitchShifterNode);
+        afterEQ = pitchShifterNode;
+    }
+
+    if (panNode) {
+        afterEQ.connect(panNode);
+        afterEQ = panNode;
+    }
+    afterEQ.connect(gainNode);
+
+    // Delay (eco)
     gainNode.connect(delayNode);
     delayNode.connect(delayGain);
     delayGain.connect(delayNode);
     delayGain.connect(gainNode);
 
+    // Reverb (dry/wet)
     const reverbValue = parseFloat(document.getElementById('reverbSlider').value) / 100;
     reverbDryGain.gain.value = 1 - reverbValue;
     reverbWetGain.gain.value = reverbValue * 0.6;
 
-    // FIX: armazena o merger em mergerNode para poder desconectá-lo depois
     mergerNode = audioContext.createGain();
     gainNode.connect(reverbDryGain);
     reverbDryGain.connect(mergerNode);
@@ -544,7 +584,6 @@ function scheduleProgressUpdate() {
 let isDragging = false;
 let wasPausedBeforeDrag = false;
 
-// Central seek function used by both click and drag
 function seekToPosition(clientX) {
     if (!audioBuffer) return;
     const rect = progressBar.getBoundingClientRect();
@@ -557,11 +596,8 @@ progressBar.addEventListener('mousedown', (e) => {
     if (!audioBuffer) return;
     isDragging = true;
     wasPausedBeforeDrag = !isPlaying;
-
-    // Seek immediately on mousedown — this handles both click and drag start
     if (isPlaying) pauseWithoutReset();
     seekToPosition(e.clientX);
-
     progressBar.style.cursor = 'grabbing';
 });
 
@@ -569,7 +605,6 @@ progressBar.addEventListener('touchstart', (e) => {
     if (!audioBuffer) return;
     isDragging = true;
     wasPausedBeforeDrag = !isPlaying;
-
     if (isPlaying) pauseWithoutReset();
     seekToPosition(e.touches[0].clientX);
 }, { passive: true });
@@ -631,7 +666,7 @@ document.getElementById('speedSlider').addEventListener('input', (e) => {
     if (audioBuffer) {
         if (isPlaying && sourceNode) {
             const currentSource = getCurrentSourceTime();
-            currentPlaybackRate = getPlaybackRate();
+            currentPlaybackRate = getPlaybackRate(); // apenas speed
             sourceNode.playbackRate.value = currentPlaybackRate;
             startTime = audioContext.currentTime - (currentSource / currentPlaybackRate);
         } else {
@@ -645,17 +680,20 @@ document.getElementById('pitchSlider').addEventListener('input', (e) => {
     const value = parseFloat(e.target.value);
     document.getElementById('pitchValue').textContent = value.toFixed(1) + ' semitones';
 
-    if (audioBuffer) {
-        if (isPlaying && sourceNode) {
+    // Atualiza o ratio do phase vocoder em tempo real (sem alterar playbackRate)
+    if (pitchShifterNode) {
+        pitchShifterNode.parameters.get('pitchRatio').value = getPitchRatio();
+    } else if (audioBuffer) {
+        // Fallback: sem worklet, reinicia com o playbackRate combinado
+        if (isPlaying) {
             const currentSource = getCurrentSourceTime();
-            currentPlaybackRate = getPlaybackRate();
-            sourceNode.playbackRate.value = currentPlaybackRate;
-            startTime = audioContext.currentTime - (currentSource / currentPlaybackRate);
-        } else {
-            currentPlaybackRate = getPlaybackRate();
+            const wasPlaying = isPlaying;
+            pauseWithoutReset();
+            pauseTime = currentSource;
+            if (wasPlaying) play();
         }
-        syncProgressUI();
     }
+    syncProgressUI();
 });
 
 document.getElementById('volumeSlider').addEventListener('input', (e) => {
@@ -789,6 +827,11 @@ function applyPreset(preset) {
     if (reverbWetGain) reverbWetGain.gain.value = wetLevel * 0.6;
     if (convolverNode) createReverbImpulse(2, Math.max(0.001, preset.reverb / 20));
 
+    // Atualiza pitch ratio no vocoder
+    if (pitchShifterNode) {
+        pitchShifterNode.parameters.get('pitchRatio').value = Math.pow(2, preset.pitch / 12);
+    }
+
     if (preset.eightD && !eightDEnabled)  eightDToggle.click();
     else if (!preset.eightD && eightDEnabled) eightDToggle.click();
 
@@ -827,15 +870,30 @@ downloadBtn.addEventListener('click', async () => {
 
         const pitchShift = parseFloat(document.getElementById('pitchSlider').value);
         const speed      = parseFloat(document.getElementById('speedSlider').value);
-        const pitchRatio = Math.pow(2, pitchShift / 12);
-        const finalPlaybackRate = speed * pitchRatio;
-        const newDuration = audioBuffer.duration / finalPlaybackRate;
+        // No export, pitch e speed são aplicados separadamente:
+        // speed via playbackRate, pitch via pitchRatio no OfflineContext
+        const newDuration = audioBuffer.duration / speed;
         const newLength   = Math.ceil(newDuration * audioContext.sampleRate);
 
         const offlineCtx    = new OfflineAudioContext(audioBuffer.numberOfChannels, newLength, audioContext.sampleRate);
         const offlineSource = offlineCtx.createBufferSource();
         offlineSource.buffer = audioBuffer;
-        offlineSource.playbackRate.value = finalPlaybackRate;
+        offlineSource.playbackRate.value = speed; // apenas speed
+
+        // Pitch shift no OfflineContext via worklet (se disponível)
+        let offlinePitchNode = null;
+        if (pitchWorkletReady && pitchShift !== 0) {
+            try {
+                await offlineCtx.audioWorklet.addModule('./pitch-shifter-processor.js');
+                offlinePitchNode = new AudioWorkletNode(offlineCtx, 'pitch-shifter-processor', {
+                    numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+                });
+                offlinePitchNode.parameters.get('pitchRatio').value = Math.pow(2, pitchShift / 12);
+            } catch(e) {
+                console.warn('Pitch worklet no offline ctx:', e);
+                offlinePitchNode = null;
+            }
+        }
 
         const offlinePreGain = offlineCtx.createGain();
         offlinePreGain.gain.value = dbToGain(parseFloat(document.getElementById('preGainSlider').value));
@@ -888,13 +946,17 @@ downloadBtn.addEventListener('click', async () => {
         const offlineOutputGain = offlineCtx.createGain();
         offlineOutputGain.gain.value = dbToGain(parseFloat(document.getElementById('outputGainSlider').value));
 
+        // Conecta o grafo offline
         offlineSource.connect(offlinePreGain);
         offlinePreGain.connect(offlineBass);
         offlineBass.connect(offlineMid);
         offlineMid.connect(offlineTreble);
+
         let cn = offlineTreble;
+        if (offlinePitchNode) { cn.connect(offlinePitchNode); cn = offlinePitchNode; }
         if (offlinePan) { cn.connect(offlinePan); cn = offlinePan; }
         cn.connect(offlineGain);
+
         if (echoValue > 0) {
             offlineGain.connect(offlineDelay);
             offlineDelay.connect(offlineDelayGain);
@@ -1015,12 +1077,9 @@ document.addEventListener('keydown', (e) => {
     const tag = e.target.tagName.toLowerCase();
     const type = (e.target.type || '').toLowerCase();
 
-    // Block shortcuts when typing in real text fields
     if (tag === 'textarea') return;
     if (tag === 'input' && type !== 'range') return;
 
-    // For Space/arrows on a focused button or range slider: blur first so the
-    // native click/change doesn't fire alongside our handler.
     if (tag === 'button' || (tag === 'input' && type === 'range')) {
         e.target.blur();
     }
@@ -1029,63 +1088,37 @@ document.addEventListener('keydown', (e) => {
         case ' ':
         case 'k':
         case 'K':
-            e.preventDefault();
-            play();
-            break;
+            e.preventDefault(); play(); break;
         case 'ArrowLeft':
-            e.preventDefault();
-            seekRelative(-5);
-            break;
+            e.preventDefault(); seekRelative(-5); break;
         case 'ArrowRight':
-            e.preventDefault();
-            seekRelative(5);
-            break;
+            e.preventDefault(); seekRelative(5); break;
         case 'j':
         case 'J':
-            e.preventDefault();
-            seekRelative(-10);
-            break;
+            e.preventDefault(); seekRelative(-10); break;
         case 'l':
         case 'L':
-            e.preventDefault();
-            seekRelative(10);
-            break;
+            e.preventDefault(); seekRelative(10); break;
         case 'Home':
-            e.preventDefault();
-            seekTo(0);
-            break;
+            e.preventDefault(); seekTo(0); break;
         case 'End':
-            e.preventDefault();
-            seekTo(audioBuffer.duration);
-            break;
+            e.preventDefault(); seekTo(audioBuffer.duration); break;
         case 'ArrowUp':
-            e.preventDefault();
-            changeVolume(5);
-            break;
+            e.preventDefault(); changeVolume(5); break;
         case 'ArrowDown':
-            e.preventDefault();
-            changeVolume(-5);
-            break;
+            e.preventDefault(); changeVolume(-5); break;
         case 'm':
         case 'M':
-            e.preventDefault();
-            toggleMute();
-            break;
+            e.preventDefault(); toggleMute(); break;
     }
 });
 
-// FIX: captura a posição atual ANTES de parar o sourceNode.
-// O bug anterior chamava getCurrentSourceTime() depois de pauseWithoutReset(),
-// que seta isPlaying=false — fazendo a função retornar pauseTime (0 ou desatualizado)
-// em vez do tempo real. Resultado: a música voltava ao início ao pular ±5s.
 function seekRelative(seconds) {
     if (!audioBuffer) return;
-    // Captura posição real ANTES de parar o sourceNode
     const currentPos = getCurrentSourceTime();
     const newTime = Math.max(0, Math.min(audioBuffer.duration, currentPos + seconds));
     const wasPlaying = isPlaying;
     if (isPlaying) pauseWithoutReset();
-    // Atribui pauseTime DEPOIS de parar, para play() usar o offset correto
     pauseTime = newTime;
     syncProgressUI(pauseTime);
     if (wasPlaying) play();
@@ -1128,4 +1161,4 @@ function toggleMute() {
     }
 }
 
-console.log('🎵 Audio Editor — memory leak fix applied ✅');
+console.log('🎵 Audio Editor — pitch shift independente (phase vocoder) ✅');
