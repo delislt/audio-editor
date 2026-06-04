@@ -1042,11 +1042,18 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+// FIX: captura a posição atual ANTES de parar o sourceNode.
+// O bug anterior chamava getCurrentSourceTime() depois de pauseWithoutReset(),
+// que seta isPlaying=false — fazendo a função retornar pauseTime (0 ou desatualizado)
+// em vez do tempo real. Resultado: a música voltava ao início ao pular ±5s.
 function seekRelative(seconds) {
     if (!audioBuffer) return;
-    const newTime = Math.max(0, Math.min(audioBuffer.duration, getCurrentSourceTime() + seconds));
+    // Captura posição real ANTES de parar o sourceNode
+    const currentPos = getCurrentSourceTime();
+    const newTime = Math.max(0, Math.min(audioBuffer.duration, currentPos + seconds));
     const wasPlaying = isPlaying;
     if (isPlaying) pauseWithoutReset();
+    // Atribui pauseTime DEPOIS de parar, para play() usar o offset correto
     pauseTime = newTime;
     syncProgressUI(pauseTime);
     if (wasPlaying) play();
@@ -1089,4 +1096,4 @@ function toggleMute() {
     }
 }
 
-console.log('🎵 Audio Editor — keyboard shortcuts fixed ✅');
+console.log('🎵 Audio Editor — seek bug fixed ✅');
