@@ -124,6 +124,86 @@ input { font: inherit; color: inherit; }
   66%      { transform: translate(-30px,40px) scale(0.96); }
 }
 
+/* ---- Pitch Processing Banner ---- */
+.pitch-processing-banner {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 999;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  /* estado inicial: escondido acima da tela */
+  transform: translateY(-100%);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pitch-processing-banner.visible {
+  transform: translateY(0);
+}
+.pitch-processing-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: white;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  padding: 10px 24px;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  box-shadow: 0 8px 32px var(--accent-glow);
+  letter-spacing: 0.02em;
+}
+
+/* Spinner do banner */
+.pitch-spinner {
+  width: 16px; height: 16px;
+  border: 2.5px solid rgba(255,255,255,0.35);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: pitchSpin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes pitchSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---- Pitch Card: spinner inline ao lado do valor ---- */
+.pitch-value-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Spinner pequeno inline */
+.pitch-processing-inline {
+  width: 14px; height: 14px;
+  flex-shrink: 0;
+  /* escondido por padrão */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.pitch-processing-inline.visible {
+  opacity: 1;
+}
+.pitch-spinner-sm {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(110,126,255,0.3);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: pitchSpin 0.7s linear infinite;
+}
+
+/* ---- Play Button: estado "processing" ---- */
+.play-btn.processing {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+.play-btn:disabled {
+  cursor: not-allowed;
+}
+
 /* ---- Container ---- */
 .container {
   max-width: 1280px;
