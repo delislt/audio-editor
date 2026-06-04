@@ -1,13 +1,13 @@
 // ============================================================
 // Audio Editor — script.js
-// Pitch shift: OfflineAudioContext resample (sem worklet)
+// Pitch shift: Phase Vocoder (OLA) — NÃO altera velocidade
 // Speed: sourceNode.playbackRate
 // Completamente independentes, sem artefatos.
 // ============================================================
 
 let audioContext;
 let audioBuffer;        // buffer original decodificado
-let pitchedBuffer;      // buffer com pitch aplicado (resampleado)
+let pitchedBuffer;      // buffer com pitch aplicado (phase vocoder)
 let sourceNode;
 let analyser;
 let preGainNode;
@@ -38,8 +38,8 @@ let clipCount = 0;
 let peakHold = 0;
 let peakHoldTime = 0;
 let currentPlaybackRate = 1.0;
-let pitchBuildPending = false; // evita reconstrução em cascata
-let isPitchProcessing = false; // controla o estado de processamento de pitch
+let pitchBuildPending = false;
+let isPitchProcessing = false;
 
 // DOM Elements
 const uploadSection  = document.getElementById('uploadSection');
@@ -68,52 +68,107 @@ function showPauseIcon() { playIcon.style.display = 'none'; pauseIcon.style.disp
 // ── Pitch Processing State ────────────────────────────────────────────────────
 function setPitchProcessing(active) {
     isPitchProcessing = active;
-    // Banner global no topo
-    if (pitchProcessingBanner) {
+    if (pitchProcessingBanner)
         pitchProcessingBanner.classList.toggle('visible', active);
-    }
-    // Spinner inline no card de pitch
     if (pitchProcessingInline) {
         pitchProcessingInline.classList.toggle('visible', active);
         pitchProcessingInline.setAttribute('aria-hidden', String(!active));
     }
-    // Trava/destrava o botão play
     if (playBtn) {
         playBtn.disabled = active;
         playBtn.classList.toggle('processing', active);
         playBtn.setAttribute('aria-label', active ? 'Processing pitch…' : (isPlaying ? 'Pause' : 'Play'));
     }
-    // Trava slider de pitch durante o processamento
     const pitchSlider = document.getElementById('pitchSlider');
     if (pitchSlider) pitchSlider.style.pointerEvents = active ? 'none' : '';
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function getSpeedValue()   { return parseFloat(document.getElementById('speedSlider').value); }
+function getSpeedValue()     { return parseFloat(document.getElementById('speedSlider').value); }
 function getPitchSemitones() { return parseFloat(document.getElementById('pitchSlider').value); }
-function getPitchRatio()   { return Math.pow(2, getPitchSemitones() / 12); }
+function getPitchRatio()     { return Math.pow(2, getPitchSemitones() / 12); }
 
-// duração ajustada pela VELOCIDADE (pitch não altera duração — ver buildPitchedBuffer)
 function getAdjustedDuration() {
     if (!pitchedBuffer) return 0;
     return pitchedBuffer.duration / getSpeedValue();
 }
 
-// ── Pitch via resample offline ────────────────────────────────────────────────
-// Técnica: toca o buffer original com playbackRate = pitchRatio num OfflineAudioContext
-// cujo tamanho é original.length/pitchRatio samples → o resultado tem duração IGUAL
-// ao original mas com as frequências transpostas. Sem mexer na velocidade.
+// ── Phase Vocoder (OLA) ───────────────────────────────────────────────────────
+// Técnica: time-stretch por 1/ratio → depois resample por ratio
+// Resultado: mesma duração do original, frequências transpostas, SEM mudar velocidade.
+//
+// Etapa 1 — time-stretch via OLA (Overlap-Add)
+//   Avança a leitura no buffer de entrada por (hopIn = hopOut * ratio) samples
+//   e escreve com hopOut fixo → audio "esticado" por factor 1/ratio.
+// Etapa 2 — downsample/upsample por ratio via OfflineAudioContext
+//   Corrige a duração de volta ao original e transpõe frequências.
 async function buildPitchedBuffer() {
     if (!audioBuffer || !audioContext) return;
-    const ratio   = getPitchRatio();
-    const sr      = audioContext.sampleRate;
-    const nCh     = audioBuffer.numberOfChannels;
-    // comprimento do buffer de saída = duração original em samples
-    const outLen  = Math.ceil(audioBuffer.length / ratio);
-    const offCtx  = new OfflineAudioContext(nCh, outLen, sr);
-    const src     = offCtx.createBufferSource();
-    src.buffer    = audioBuffer;
-    src.playbackRate.value = ratio;   // transpõe pitch
+
+    const ratio = getPitchRatio();
+
+    // pitch == 0 → devolve cópia direta sem processamento
+    if (Math.abs(ratio - 1) < 1e-6) {
+        const copy = audioContext.createBuffer(
+            audioBuffer.numberOfChannels,
+            audioBuffer.length,
+            audioBuffer.sampleRate
+        );
+        for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++)
+            copy.getChannelData(ch).set(audioBuffer.getChannelData(ch));
+        pitchedBuffer = copy;
+        return;
+    }
+
+    // Parâmetros OLA
+    const frameSize = 2048;          // tamanho da janela
+    const hopOut    = 512;           // passo de escrita fixo
+    const hopIn     = hopOut * ratio; // passo de leitura = ratio × hopOut
+
+    const nCh      = audioBuffer.numberOfChannels;
+    const inLen    = audioBuffer.length;
+    // tamanho do buffer esticado = ceil(inLen / ratio)
+    const outLen   = Math.ceil(inLen / ratio);
+
+    // Cria arrays de saída (um por canal)
+    const outArrays = Array.from({ length: nCh }, () => new Float32Array(outLen));
+
+    // Janela de Hann (suaviza bordas de cada frame)
+    const window = new Float32Array(frameSize);
+    for (let i = 0; i < frameSize; i++)
+        window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (frameSize - 1)));
+
+    // OLA: percorre cada canal no worker principal (síncrono mas rápido)
+    for (let ch = 0; ch < nCh; ch++) {
+        const inData  = audioBuffer.getChannelData(ch);
+        const outData = outArrays[ch];
+        let   inPos   = 0;   // posição de leitura (float)
+        let   outPos  = 0;   // posição de escrita (inteiro)
+
+        while (outPos + frameSize <= outLen) {
+            const inIdx = Math.round(inPos);
+            // Copia frame windowed do input → output
+            for (let i = 0; i < frameSize; i++) {
+                const src = inIdx + i;
+                outData[outPos + i] += (src < inLen ? inData[src] : 0) * window[i];
+            }
+            inPos  += hopIn;
+            outPos += hopOut;
+        }
+    }
+
+    // Monta AudioBuffer com o sinal esticado
+    const stretchedBuf = audioContext.createBuffer(nCh, outLen, audioBuffer.sampleRate);
+    for (let ch = 0; ch < nCh; ch++)
+        stretchedBuf.getChannelData(ch).set(outArrays[ch]);
+
+    // Etapa 2: resample de volta ao comprimento original via OfflineAudioContext
+    // playbackRate = ratio  +  outLength = inLen  →  frequências sobem/descem
+    // mas a DURAÇÃO volta a ser igual à do áudio original
+    const offCtx = new OfflineAudioContext(nCh, inLen, audioBuffer.sampleRate);
+    const src    = offCtx.createBufferSource();
+    src.buffer   = stretchedBuf;
+    src.playbackRate.value = ratio;   // "comprime" de volta → transpõe frequências
     src.connect(offCtx.destination);
     src.start(0);
     pitchedBuffer = await offCtx.startRendering();
@@ -187,7 +242,6 @@ async function loadAudioFile(file) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const arrayBuffer = await file.arrayBuffer();
         audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        // Constrói buffer com pitch inicial (0 semitones = ratio 1 = cópia direta)
         setPitchProcessing(true);
         await buildPitchedBuffer();
         setPitchProcessing(false);
@@ -269,14 +323,13 @@ function createReverbImpulse(duration, decay) {
 // ====================================
 function play() {
     if (!pitchedBuffer) return;
-    if (isPitchProcessing) return; // bloqueia play durante processamento
+    if (isPitchProcessing) return;
     if (isPlaying) { pause(); return; }
     if (audioContext.state === 'suspended') audioContext.resume();
 
     sourceNode = audioContext.createBufferSource();
-    sourceNode.buffer = pitchedBuffer;  // buffer já com pitch aplicado
+    sourceNode.buffer = pitchedBuffer;
 
-    // Apenas a velocidade no playbackRate — pitch já está no buffer
     currentPlaybackRate = getSpeedValue();
     sourceNode.playbackRate.value = currentPlaybackRate;
 
@@ -528,18 +581,13 @@ let pitchDebounceTimer = null;
 document.getElementById('pitchSlider').addEventListener('input', e => {
     const v = parseFloat(e.target.value);
     document.getElementById('pitchValue').textContent = v.toFixed(1) + ' st';
-    // Mostra o spinner inline imediatamente (feedback visual antes do debounce)
     if (pitchProcessingInline) {
         pitchProcessingInline.classList.add('visible');
         pitchProcessingInline.setAttribute('aria-hidden', 'false');
     }
-    // Debounce: espera 300ms sem mover o slider para reconstruir
     clearTimeout(pitchDebounceTimer);
     pitchDebounceTimer = setTimeout(async () => {
-        if (!audioBuffer) {
-            setPitchProcessing(false);
-            return;
-        }
+        if (!audioBuffer) { setPitchProcessing(false); return; }
         const wasPlaying = isPlaying;
         const savedTime  = getCurrentSourceTime();
         if (isPlaying) pauseWithoutReset();
@@ -710,23 +758,51 @@ downloadBtn.addEventListener('click', async () => {
 
         const pitchSemitones = parseFloat(document.getElementById('pitchSlider').value);
         const speed          = parseFloat(document.getElementById('speedSlider').value);
-        // Tamanho final = duração_com_pitch / velocidade
-        const pitchRatio  = Math.pow(2, pitchSemitones / 12);
-        const pitchedLen  = Math.ceil(audioBuffer.length / pitchRatio);
-        const finalLen    = Math.ceil(pitchedLen / speed);
 
-        // Passo 1: aplica pitch
-        const pitchCtx  = new OfflineAudioContext(audioBuffer.numberOfChannels, pitchedLen, audioContext.sampleRate);
-        const pitchSrc  = pitchCtx.createBufferSource();
-        pitchSrc.buffer = audioBuffer;
-        pitchSrc.playbackRate.value = pitchRatio;
-        pitchSrc.connect(pitchCtx.destination);
-        pitchSrc.start(0);
-        const pitchedOut = await pitchCtx.startRendering();
+        // Etapa 1: aplica pitch via phase vocoder (mesma lógica do buildPitchedBuffer)
+        let pitchedOut;
+        if (Math.abs(pitchSemitones) < 0.001) {
+            pitchedOut = audioBuffer;
+        } else {
+            const pitchRatio = Math.pow(2, pitchSemitones / 12);
+            const frameSize  = 2048;
+            const hopOut     = 512;
+            const hopIn      = hopOut * pitchRatio;
+            const nCh        = audioBuffer.numberOfChannels;
+            const inLen      = audioBuffer.length;
+            const outLen     = Math.ceil(inLen / pitchRatio);
+            const win        = new Float32Array(frameSize);
+            for (let i = 0; i < frameSize; i++)
+                win[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (frameSize - 1)));
+            const outArrays = Array.from({ length: nCh }, () => new Float32Array(outLen));
+            for (let ch = 0; ch < nCh; ch++) {
+                const inData = audioBuffer.getChannelData(ch);
+                const outData = outArrays[ch];
+                let inPos = 0, outPos = 0;
+                while (outPos + frameSize <= outLen) {
+                    const inIdx = Math.round(inPos);
+                    for (let i = 0; i < frameSize; i++) {
+                        const s = inIdx + i;
+                        outData[outPos + i] += (s < inLen ? inData[s] : 0) * win[i];
+                    }
+                    inPos += hopIn; outPos += hopOut;
+                }
+            }
+            const stretchedBuf = audioContext.createBuffer(nCh, outLen, audioBuffer.sampleRate);
+            for (let ch = 0; ch < nCh; ch++) stretchedBuf.getChannelData(ch).set(outArrays[ch]);
+            const pitchCtx  = new OfflineAudioContext(nCh, inLen, audioContext.sampleRate);
+            const pitchSrc  = pitchCtx.createBufferSource();
+            pitchSrc.buffer = stretchedBuf;
+            pitchSrc.playbackRate.value = pitchRatio;
+            pitchSrc.connect(pitchCtx.destination);
+            pitchSrc.start(0);
+            pitchedOut = await pitchCtx.startRendering();
+        }
 
-        // Passo 2: aplica velocidade + efeitos
-        const offlineCtx = new OfflineAudioContext(2, finalLen, audioContext.sampleRate);
-        const offlineSrc = offlineCtx.createBufferSource();
+        // Etapa 2: aplica velocidade + efeitos
+        const finalLen    = Math.ceil(pitchedOut.length / speed);
+        const offlineCtx  = new OfflineAudioContext(2, finalLen, audioContext.sampleRate);
+        const offlineSrc  = offlineCtx.createBufferSource();
         offlineSrc.buffer = pitchedOut;
         offlineSrc.playbackRate.value = speed;
 
@@ -876,7 +952,7 @@ waveformCanvas.height = waveformCanvas.offsetHeight * 2;
 // ====================================
 document.addEventListener('keydown', e => {
     if (!pitchedBuffer) return;
-    if (isPitchProcessing) return; // bloqueia atalhos durante processamento
+    if (isPitchProcessing) return;
     const tag  = e.target.tagName.toLowerCase();
     const type = (e.target.type || '').toLowerCase();
     if (tag === 'textarea') return;
@@ -934,4 +1010,4 @@ function toggleMute() {
     }
 }
 
-console.log('🎵 Audio Editor — pitch via OfflineAudioContext resample ✅');
+console.log('🎵 Audio Editor — pitch via Phase Vocoder (OLA) ✅');
