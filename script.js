@@ -979,19 +979,66 @@ waveformCanvas.height = waveformCanvas.offsetHeight * 2;
 
 document.addEventListener('keydown', (e) => {
     if (!audioBuffer) return;
+
     const tag = e.target.tagName.toLowerCase();
-    if (tag === 'input' || tag === 'textarea') return;
-    switch (e.key.toLowerCase()) {
-        case ' ': case 'k': e.preventDefault(); play(); break;
-        case 'arrowleft':  e.preventDefault(); seekRelative(-5);  break;
-        case 'arrowright': e.preventDefault(); seekRelative(5);   break;
-        case 'j':          e.preventDefault(); seekRelative(-10); break;
-        case 'l':          e.preventDefault(); seekRelative(10);  break;
-        case 'home':       e.preventDefault(); seekTo(0); break;
-        case 'end':        e.preventDefault(); seekTo(audioBuffer.duration); break;
-        case 'arrowup':    e.preventDefault(); changeVolume(5);  break;
-        case 'arrowdown':  e.preventDefault(); changeVolume(-5); break;
-        case 'm':          e.preventDefault(); toggleMute(); break;
+    const type = (e.target.type || '').toLowerCase();
+
+    // Block shortcuts when typing in real text fields
+    if (tag === 'textarea') return;
+    if (tag === 'input' && type !== 'range') return;
+
+    // For Space/arrows on a focused button or range slider: blur first so the
+    // native click/change doesn't fire alongside our handler.
+    if (tag === 'button' || (tag === 'input' && type === 'range')) {
+        e.target.blur();
+    }
+
+    switch (e.key) {
+        case ' ':
+        case 'k':
+        case 'K':
+            e.preventDefault();
+            play();
+            break;
+        case 'ArrowLeft':
+            e.preventDefault();
+            seekRelative(-5);
+            break;
+        case 'ArrowRight':
+            e.preventDefault();
+            seekRelative(5);
+            break;
+        case 'j':
+        case 'J':
+            e.preventDefault();
+            seekRelative(-10);
+            break;
+        case 'l':
+        case 'L':
+            e.preventDefault();
+            seekRelative(10);
+            break;
+        case 'Home':
+            e.preventDefault();
+            seekTo(0);
+            break;
+        case 'End':
+            e.preventDefault();
+            seekTo(audioBuffer.duration);
+            break;
+        case 'ArrowUp':
+            e.preventDefault();
+            changeVolume(5);
+            break;
+        case 'ArrowDown':
+            e.preventDefault();
+            changeVolume(-5);
+            break;
+        case 'm':
+        case 'M':
+            e.preventDefault();
+            toggleMute();
+            break;
     }
 });
 
@@ -1042,4 +1089,4 @@ function toggleMute() {
     }
 }
 
-console.log('🎵 Audio Editor — progress bar seek-on-mousedown ✅');
+console.log('🎵 Audio Editor — keyboard shortcuts fixed ✅');
