@@ -1,50 +1,45 @@
 // ============================================================
 // Audio Editor — script.js
-// Pitch shift: Phase Vocoder (OLA) — NÃO altera velocidade
-// Speed: sourceNode.playbackRate
-// Completamente independentes, sem artefatos.
+// Pitch shift: Tone.js PitchShift (phase vocoder FFT real)
+//              → pitch alterado SEM mudar velocidade
+// Speed:       Tone.Player.playbackRate
+//              → velocidade alterada SEM mudar pitch
+// Completamente independentes.
 // ============================================================
 
-let audioContext;
-let audioBuffer;        // buffer original decodificado
-let pitchedBuffer;      // buffer com pitch aplicado (phase vocoder)
-let sourceNode;
-let analyser;
-let preGainNode;
-let gainNode;
-let outputGainNode;
-let compressorNode;
-let bassFilter;
-let midFilter;
-let trebleFilter;
-let panNode;
-let convolverNode;
-let reverbDryGain;
-let reverbWetGain;
-let delayNode;
-let delayGain;
-let mergerNode;
-let isPlaying = false;
-let startTime = 0;
-let pauseTime = 0;
-let animationId;
-let progressRafId;
-let meterInterval;
-let eightDAudioInterval;
-let eightDEnabled = false;
+// ── Estado global ─────────────────────────────────────────────────────────────
+let audioContext;          // contexto nativo (para waveform / analyser / export)
+let audioBuffer;           // AudioBuffer original decodificado
+let tonePlayer;            // Tone.Player — fonte de áudio
+let tonePitchShift;        // Tone.PitchShift — phase vocoder
+let toneGain;              // Tone.Gain — volume
+let toneBass;              // Tone.EQ3 ou Filter
+let toneTreble;
+let tonePan;               // Tone.Panner
+let toneReverb;            // Tone.Reverb
+let toneDelay;             // Tone.FeedbackDelay
+let toneCompressor;        // Tone.Compressor
+let analyserNode;          // AnalyserNode nativo (ligado via Tone.Destination)
+let analyserGain;          // Gain nativo para analyser
+
+let isPlaying    = false;
+let pauseOffset  = 0;      // posição (segundos) onde a reprodução foi pausada
+let playStarted  = 0;      // Tone.now() quando play() foi chamado
+let eightDEnabled  = false;
+let eightDAudioInterval = null;
 let limiterEnabled = true;
 let currentFileName = '';
-let clipCount = 0;
-let peakHold = 0;
-let peakHoldTime = 0;
-let currentPlaybackRate = 1.0;
-let pitchBuildPending = false;
-let isPitchProcessing = false;
+let meterInterval   = null;
+let progressRafId   = null;
+let animationId     = null;
+let isDragging      = false;
+let wasPausedBeforeDrag = false;
+let previousVolume  = 100;
+let isMuted         = false;
 
-// DOM Elements
+// DOM
 const uploadSection  = document.getElementById('uploadSection');
 const fileInput      = document.getElementById('fileInput');
-const playerSection  = document.getElementById('playerSection');
 const playBtn        = document.getElementById('playBtn');
 const stopBtn        = document.getElementById('stopBtn');
 const resetBtn       = document.getElementById('resetBtn');
@@ -61,165 +56,126 @@ const playIcon       = document.getElementById('playIcon');
 const pauseIcon      = document.getElementById('pauseIcon');
 const pitchProcessingBanner = document.getElementById('pitchProcessingBanner');
 const pitchProcessingInline = document.getElementById('pitchProcessingInline');
+const eightDToggle   = document.getElementById('eightDToggle');
 
 function showPlayIcon()  { playIcon.style.display = ''; pauseIcon.style.display = 'none'; }
 function showPauseIcon() { playIcon.style.display = 'none'; pauseIcon.style.display = ''; }
 
-// ── Pitch Processing State ────────────────────────────────────────────────────
-function setPitchProcessing(active) {
-    isPitchProcessing = active;
-    if (pitchProcessingBanner)
-        pitchProcessingBanner.classList.toggle('visible', active);
-    if (pitchProcessingInline) {
-        pitchProcessingInline.classList.toggle('visible', active);
-        pitchProcessingInline.setAttribute('aria-hidden', String(!active));
-    }
-    if (playBtn) {
-        playBtn.disabled = active;
-        playBtn.classList.toggle('processing', active);
-        playBtn.setAttribute('aria-label', active ? 'Processing pitch…' : (isPlaying ? 'Pause' : 'Play'));
-    }
-    const pitchSlider = document.getElementById('pitchSlider');
-    if (pitchSlider) pitchSlider.style.pointerEvents = active ? 'none' : '';
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getSpeedValue()     { return parseFloat(document.getElementById('speedSlider').value); }
 function getPitchSemitones() { return parseFloat(document.getElementById('pitchSlider').value); }
-function getPitchRatio()     { return Math.pow(2, getPitchSemitones() / 12); }
-
+function getDuration()       { return audioBuffer ? audioBuffer.duration : 0; }
 function getAdjustedDuration() {
-    if (!pitchedBuffer) return 0;
-    return pitchedBuffer.duration / getSpeedValue();
+    // duração real = duração do buffer / velocidade
+    return getDuration() / getSpeedValue();
 }
 
-// ── Phase Vocoder (OLA) ───────────────────────────────────────────────────────
-// Técnica: time-stretch por 1/ratio → depois resample por ratio
-// Resultado: mesma duração do original, frequências transpostas, SEM mudar velocidade.
-//
-// Etapa 1 — time-stretch via OLA (Overlap-Add)
-//   Avança a leitura no buffer de entrada por (hopIn = hopOut * ratio) samples
-//   e escreve com hopOut fixo → audio "esticado" por factor 1/ratio.
-// Etapa 2 — downsample/upsample por ratio via OfflineAudioContext
-//   Corrige a duração de volta ao original e transpõe frequências.
-async function buildPitchedBuffer() {
-    if (!audioBuffer || !audioContext) return;
+function getCurrentOffset() {
+    if (!isPlaying) return pauseOffset;
+    const elapsed = (Tone.now() - playStarted) * getSpeedValue();
+    return Math.min(pauseOffset + elapsed, getDuration());
+}
 
-    const ratio = getPitchRatio();
+// ── Tone.js Graph ─────────────────────────────────────────────────────────────
+// Fluxo:
+// Player → PitchShift → EQ (bass/treble) → Pan → Gain(vol) → Delay → Reverb → Compressor → Destination
+//                                                                                           ↓
+//                                                                              AnalyserNode nativo
+async function buildToneGraph() {
+    // Teardown anterior
+    teardownToneGraph();
 
-    // pitch == 0 → devolve cópia direta sem processamento
-    if (Math.abs(ratio - 1) < 1e-6) {
-        const copy = audioContext.createBuffer(
-            audioBuffer.numberOfChannels,
-            audioBuffer.length,
-            audioBuffer.sampleRate
-        );
-        for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++)
-            copy.getChannelData(ch).set(audioBuffer.getChannelData(ch));
-        pitchedBuffer = copy;
-        return;
+    // Inicia Tone.js (usa AudioContext já existente se possível)
+    await Tone.start();
+
+    // Player: carrega o AudioBuffer diretamente
+    tonePlayer = new Tone.Player().toDestination();
+    tonePlayer.buffer = new Tone.ToneAudioBuffer();
+    tonePlayer.buffer._buffer = audioBuffer;  // injeta buffer nativo
+    tonePlayer.loaded = true;
+    tonePlayer.loop   = false;
+
+    // PitchShift — phase vocoder: altera pitch SEM alterar velocidade
+    tonePitchShift = new Tone.PitchShift({
+        pitch:    getPitchSemitones(),
+        windowSize: 0.1,
+        delayTime:  0,
+        feedback:   0
+    });
+
+    // EQ
+    const bassVal   = parseFloat(document.getElementById('bassSlider').value);
+    const trebleVal = parseFloat(document.getElementById('trebleSlider').value);
+    toneBass   = new Tone.Filter({ type: 'lowshelf',  frequency: 200,  gain: bassVal });
+    toneTreble = new Tone.Filter({ type: 'highshelf', frequency: 3000, gain: trebleVal });
+
+    // Pan
+    const panVal = eightDEnabled ? 0 : parseFloat(document.getElementById('panSlider').value) / 100;
+    tonePan = new Tone.Panner(panVal);
+
+    // Volume
+    const volVal = parseFloat(document.getElementById('volumeSlider').value) / 100;
+    toneGain = new Tone.Gain(volVal);
+
+    // Delay / Echo
+    const echoVal = parseFloat(document.getElementById('echoSlider').value) / 100;
+    toneDelay = new Tone.FeedbackDelay({
+        delayTime: 0.3,
+        feedback:  Math.min(0.55, echoVal * 0.5),
+        wet:       echoVal
+    });
+
+    // Reverb
+    const revVal = parseFloat(document.getElementById('reverbSlider').value) / 100;
+    toneReverb = new Tone.Reverb({ decay: 2.0, wet: revVal });
+    await toneReverb.ready;
+
+    // Compressor (limiter)
+    toneCompressor = new Tone.Compressor({
+        threshold: -6, knee: 0, ratio: 20, attack: 0.003, release: 0.1
+    });
+
+    // Analyser nativo (para waveform/meter)
+    if (!analyserNode) {
+        analyserNode = Tone.getContext().rawContext.createAnalyser();
+        analyserNode.fftSize = 2048;
+        analyserNode.smoothingTimeConstant = 0.8;
     }
+    analyserGain = Tone.getContext().rawContext.createGain();
+    analyserGain.gain.value = 1;
+    analyserGain.connect(analyserNode);
+    analyserNode.connect(Tone.getDestination().input);
 
-    // Parâmetros OLA
-    const frameSize = 2048;          // tamanho da janela
-    const hopOut    = 512;           // passo de escrita fixo
-    const hopIn     = hopOut * ratio; // passo de leitura = ratio × hopOut
-
-    const nCh      = audioBuffer.numberOfChannels;
-    const inLen    = audioBuffer.length;
-    // tamanho do buffer esticado = ceil(inLen / ratio)
-    const outLen   = Math.ceil(inLen / ratio);
-
-    // Cria arrays de saída (um por canal)
-    const outArrays = Array.from({ length: nCh }, () => new Float32Array(outLen));
-
-    // Janela de Hann (suaviza bordas de cada frame)
-    const window = new Float32Array(frameSize);
-    for (let i = 0; i < frameSize; i++)
-        window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (frameSize - 1)));
-
-    // OLA: percorre cada canal no worker principal (síncrono mas rápido)
-    for (let ch = 0; ch < nCh; ch++) {
-        const inData  = audioBuffer.getChannelData(ch);
-        const outData = outArrays[ch];
-        let   inPos   = 0;   // posição de leitura (float)
-        let   outPos  = 0;   // posição de escrita (inteiro)
-
-        while (outPos + frameSize <= outLen) {
-            const inIdx = Math.round(inPos);
-            // Copia frame windowed do input → output
-            for (let i = 0; i < frameSize; i++) {
-                const src = inIdx + i;
-                outData[outPos + i] += (src < inLen ? inData[src] : 0) * window[i];
-            }
-            inPos  += hopIn;
-            outPos += hopOut;
-        }
-    }
-
-    // Monta AudioBuffer com o sinal esticado
-    const stretchedBuf = audioContext.createBuffer(nCh, outLen, audioBuffer.sampleRate);
-    for (let ch = 0; ch < nCh; ch++)
-        stretchedBuf.getChannelData(ch).set(outArrays[ch]);
-
-    // Etapa 2: resample de volta ao comprimento original via OfflineAudioContext
-    // playbackRate = ratio  +  outLength = inLen  →  frequências sobem/descem
-    // mas a DURAÇÃO volta a ser igual à do áudio original
-    const offCtx = new OfflineAudioContext(nCh, inLen, audioBuffer.sampleRate);
-    const src    = offCtx.createBufferSource();
-    src.buffer   = stretchedBuf;
-    src.playbackRate.value = ratio;   // "comprime" de volta → transpõe frequências
-    src.connect(offCtx.destination);
-    src.start(0);
-    pitchedBuffer = await offCtx.startRendering();
+    // Cadeia: Player → PitchShift → Bass → Treble → Pan → Gain → Delay → Reverb → Compressor → Tone.Dest
+    tonePlayer.disconnect();
+    tonePlayer.connect(tonePitchShift);
+    tonePitchShift.connect(toneBass);
+    toneBass.connect(toneTreble);
+    toneTreble.connect(tonePan);
+    tonePan.connect(toneGain);
+    toneGain.connect(toneDelay);
+    toneDelay.connect(toneReverb);
+    toneReverb.connect(toneCompressor);
+    toneCompressor.connect(analyserGain);
+    // analyserGain → analyserNode → Tone.Destination (conectado acima)
+    toneCompressor.toDestination();
 }
 
-// ── Progress UI ───────────────────────────────────────────────────────────────
-function syncProgressUI(sourceTime) {
-    if (!pitchedBuffer) return;
-    if (sourceTime === undefined) sourceTime = getCurrentSourceTime();
-    const dur   = pitchedBuffer.duration;
-    const ratio = dur > 0 ? Math.max(0, Math.min(1, sourceTime / dur)) : 0;
-    const pct   = (ratio * 100).toFixed(4) + '%';
-    progressFill.style.width = pct;
-    if (progressThumb) progressThumb.style.left = pct;
-    const adjDur = getAdjustedDuration();
-    currentTimeEl.textContent = formatTime(ratio * adjDur);
-    totalTimeEl.textContent   = formatTime(adjDur);
+function teardownToneGraph() {
+    try { if (tonePlayer)     { tonePlayer.stop(); tonePlayer.dispose(); }     } catch(e){}
+    try { if (tonePitchShift) { tonePitchShift.dispose(); }                    } catch(e){}
+    try { if (toneBass)       { toneBass.dispose(); }                          } catch(e){}
+    try { if (toneTreble)     { toneTreble.dispose(); }                        } catch(e){}
+    try { if (tonePan)        { tonePan.dispose(); }                           } catch(e){}
+    try { if (toneGain)       { toneGain.dispose(); }                          } catch(e){}
+    try { if (toneDelay)      { toneDelay.dispose(); }                         } catch(e){}
+    try { if (toneReverb)     { toneReverb.dispose(); }                        } catch(e){}
+    try { if (toneCompressor) { toneCompressor.dispose(); }                    } catch(e){}
+    tonePlayer = tonePitchShift = toneBass = toneTreble = tonePan = null;
+    toneGain = toneDelay = toneReverb = toneCompressor = null;
 }
 
-function getCurrentSourceTime() {
-    if (!pitchedBuffer) return 0;
-    if (isPlaying) {
-        const wall = audioContext.currentTime - startTime;
-        return Math.min(wall * currentPlaybackRate, pitchedBuffer.duration);
-    }
-    return Math.min(pauseTime, pitchedBuffer.duration);
-}
-
-// ── Disconnect ────────────────────────────────────────────────────────────────
-function disconnectAudioGraph() {
-    [
-        preGainNode, bassFilter, midFilter, trebleFilter, panNode,
-        gainNode, delayNode, delayGain, reverbDryGain, reverbWetGain,
-        convolverNode, mergerNode, compressorNode, outputGainNode, analyser,
-    ].forEach(n => { if (n) try { n.disconnect(); } catch(e){} });
-    mergerNode = null;
-}
-
-function pauseWithoutReset() {
-    if (sourceNode) { try { sourceNode.stop(); } catch(e){} try { sourceNode.disconnect(); } catch(e){} }
-    disconnectAudioGraph();
-    isPlaying = false;
-    showPlayIcon();
-    cancelAnimationFrame(progressRafId);
-    cancelAnimationFrame(animationId);
-    stopLevelMeter();
-}
-
-// ====================================
-// FILE UPLOAD
-// ====================================
+// ── Upload ────────────────────────────────────────────────────────────────────
 uploadSection.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', e => { const f = e.target.files[0]; if (f) loadAudioFile(f); });
 uploadSection.addEventListener('dragover', e => { e.preventDefault(); uploadSection.classList.add('drag-over'); });
@@ -231,128 +187,73 @@ uploadSection.addEventListener('drop', e => {
     else alert('Please upload a valid audio file (MP3, WAV, OGG)');
 });
 
-// ====================================
-// LOAD AUDIO
-// ====================================
 async function loadAudioFile(file) {
     currentFileName = file.name;
     fileNameEl.textContent = currentFileName;
     try {
-        if (audioContext) try { await audioContext.close(); } catch(e){}
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        isPlaying = false; pauseOffset = 0;
+        stopLevelMeter();
+        cancelAnimationFrame(progressRafId);
+        cancelAnimationFrame(animationId);
+
+        // Decodifica com AudioContext nativo
+        if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioContext.state === 'suspended') await audioContext.resume();
         const arrayBuffer = await file.arrayBuffer();
         audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        setPitchProcessing(true);
-        await buildPitchedBuffer();
-        setPitchProcessing(false);
+
+        await buildToneGraph();
+
         document.querySelectorAll('.player-section').forEach(el => el.classList.add('active'));
-        initializeAudioNodes();
         drawWaveform();
-        pauseTime = 0; startTime = 0; isPlaying = false;
         showPlayIcon();
         syncProgressUI(0);
-        console.log('✅ Audio loaded');
-    } catch (err) {
-        setPitchProcessing(false);
-        console.error('Error loading audio:', err);
-        alert('Failed to load audio file. Please try another file.');
+        totalTimeEl.textContent = formatTime(getAdjustedDuration());
+        console.log('✅ Tone.js graph pronto — pitch via PitchShift (phase vocoder)');
+    } catch(err) {
+        console.error('Erro ao carregar áudio:', err);
+        alert('Falha ao carregar o arquivo. Tente outro formato.');
     }
 }
 
-// ====================================
-// INIT NODES
-// ====================================
-function initializeAudioNodes() {
-    preGainNode = audioContext.createGain();
-    preGainNode.gain.value = dbToGain(-9);
-
-    gainNode = audioContext.createGain();
-    gainNode.gain.value = 1.0;
-
-    bassFilter = audioContext.createBiquadFilter();
-    bassFilter.type = 'lowshelf'; bassFilter.frequency.value = 200; bassFilter.gain.value = 0;
-
-    midFilter = audioContext.createBiquadFilter();
-    midFilter.type = 'peaking'; midFilter.frequency.value = 1000; midFilter.Q.value = 0.8; midFilter.gain.value = 0;
-
-    trebleFilter = audioContext.createBiquadFilter();
-    trebleFilter.type = 'highshelf'; trebleFilter.frequency.value = 3000; trebleFilter.gain.value = 0;
-
-    panNode = audioContext.createStereoPanner ? audioContext.createStereoPanner() : null;
-
-    convolverNode  = audioContext.createConvolver();
-    reverbDryGain  = audioContext.createGain(); reverbDryGain.gain.value  = 1.0;
-    reverbWetGain  = audioContext.createGain(); reverbWetGain.gain.value  = 0.0;
-    createReverbImpulse(2, 0);
-
-    delayNode = audioContext.createDelay(5.0); delayNode.delayTime.value = 0.3;
-    delayGain = audioContext.createGain();     delayGain.gain.value      = 0;
-
-    compressorNode = audioContext.createDynamicsCompressor();
-    compressorNode.threshold.value = -6; compressorNode.knee.value    = 0;
-    compressorNode.ratio.value     = 20; compressorNode.attack.value  = 0.003;
-    compressorNode.release.value   = 0.1;
-
-    outputGainNode = audioContext.createGain();
-    outputGainNode.gain.value = dbToGain(-1);
-
-    analyser = audioContext.createAnalyser();
-    analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.8;
-
-    mergerNode = null;
-}
-
-// ====================================
-// REVERB
-// ====================================
-function createReverbImpulse(duration, decay) {
-    const rate   = audioContext.sampleRate;
-    const length = Math.max(1, Math.round(rate * duration));
-    const impulse = audioContext.createBuffer(2, length, rate);
-    const safe   = Math.max(0.001, decay);
-    for (let ch = 0; ch < 2; ch++) {
-        const buf = impulse.getChannelData(ch);
-        for (let i = 0; i < length; i++)
-            buf[i] = (Math.random() * 2 - 1) * Math.pow((length - i) / length, safe);
-    }
-    convolverNode.buffer = impulse;
-}
-
-// ====================================
-// PLAYBACK
-// ====================================
-function play() {
-    if (!pitchedBuffer) return;
-    if (isPitchProcessing) return;
+// ── Playback ──────────────────────────────────────────────────────────────────
+async function play() {
+    if (!audioBuffer) return;
     if (isPlaying) { pause(); return; }
-    if (audioContext.state === 'suspended') audioContext.resume();
+    await Tone.start();
+    if (!tonePlayer) await buildToneGraph();
 
-    sourceNode = audioContext.createBufferSource();
-    sourceNode.buffer = pitchedBuffer;
+    const speed  = getSpeedValue();
+    tonePlayer.playbackRate = speed;
+    // PitchShift já está configurado; só garante o valor atual
+    if (tonePitchShift) tonePitchShift.pitch = getPitchSemitones();
 
-    currentPlaybackRate = getSpeedValue();
-    sourceNode.playbackRate.value = currentPlaybackRate;
-
-    connectAudioGraph();
-
-    const offset = Math.min(pauseTime, pitchedBuffer.duration - 0.001);
-    sourceNode.start(0, offset);
-    startTime = audioContext.currentTime - (offset / currentPlaybackRate);
-    isPlaying = true;
+    const offset = Math.min(pauseOffset, getDuration() - 0.01);
+    tonePlayer.start(Tone.now(), offset);
+    playStarted = Tone.now() - offset / speed;
+    isPlaying   = true;
     showPauseIcon();
 
-    sourceNode.onended = () => { if (isPlaying) stop(); };
+    // Quando termina naturalmente
+    tonePlayer.onstop = () => { if (isPlaying) _onEnded(); };
 
     visualize();
     scheduleProgressUpdate();
     startLevelMeter();
 }
 
+function _onEnded() {
+    isPlaying = false; pauseOffset = 0;
+    showPlayIcon(); syncProgressUI(0);
+    cancelAnimationFrame(progressRafId);
+    cancelAnimationFrame(animationId);
+    stopLevelMeter();
+}
+
 function pause() {
     if (!isPlaying) return;
-    pauseTime = getCurrentSourceTime();
-    try { sourceNode.stop(); } catch(e){}
-    disconnectAudioGraph();
+    pauseOffset = getCurrentOffset();
+    try { tonePlayer.stop(); } catch(e){}
     isPlaying = false; showPlayIcon();
     cancelAnimationFrame(progressRafId);
     cancelAnimationFrame(animationId);
@@ -360,99 +261,165 @@ function pause() {
 }
 
 function stop() {
-    if (sourceNode) { try { sourceNode.stop(); } catch(e){} try { sourceNode.disconnect(); } catch(e){} }
-    disconnectAudioGraph();
-    isPlaying = false; pauseTime = 0; startTime = 0;
+    try { if (tonePlayer) tonePlayer.stop(); } catch(e){}
+    isPlaying = false; pauseOffset = 0;
     showPlayIcon(); syncProgressUI(0);
     cancelAnimationFrame(progressRafId);
     cancelAnimationFrame(animationId);
     stopLevelMeter();
 }
 
-// ====================================
-// CONNECT GRAPH
-// ====================================
-function connectAudioGraph() {
-    disconnectAudioGraph();
-    sourceNode.connect(preGainNode);
-    preGainNode.connect(bassFilter);
-    bassFilter.connect(midFilter);
-    midFilter.connect(trebleFilter);
-    let last = trebleFilter;
-    if (panNode) { last.connect(panNode); last = panNode; }
-    last.connect(gainNode);
-    gainNode.connect(delayNode);
-    delayNode.connect(delayGain);
-    delayGain.connect(delayNode);
-    delayGain.connect(gainNode);
-    const reverbValue = parseFloat(document.getElementById('reverbSlider').value) / 100;
-    reverbDryGain.gain.value = 1 - reverbValue;
-    reverbWetGain.gain.value = reverbValue * 0.6;
-    mergerNode = audioContext.createGain();
-    gainNode.connect(reverbDryGain); reverbDryGain.connect(mergerNode);
-    gainNode.connect(convolverNode); convolverNode.connect(reverbWetGain); reverbWetGain.connect(mergerNode);
-    if (limiterEnabled) {
-        mergerNode.connect(compressorNode); compressorNode.connect(outputGainNode);
-    } else {
-        mergerNode.connect(outputGainNode);
-    }
-    outputGainNode.connect(analyser);
-    analyser.connect(audioContext.destination);
+// ── Progress UI ───────────────────────────────────────────────────────────────
+function syncProgressUI(overrideOffset) {
+    const offset  = overrideOffset !== undefined ? overrideOffset : getCurrentOffset();
+    const dur     = getDuration();
+    const adjDur  = getAdjustedDuration();
+    const adjOff  = dur > 0 ? (offset / dur) * adjDur : 0;
+    const ratio   = adjDur > 0 ? Math.max(0, Math.min(1, adjOff / adjDur)) : 0;
+    const pct     = (ratio * 100).toFixed(4) + '%';
+    progressFill.style.width = pct;
+    if (progressThumb) progressThumb.style.left = pct;
+    currentTimeEl.textContent = formatTime(adjOff);
+    totalTimeEl.textContent   = formatTime(adjDur);
 }
 
-// ====================================
-// LEVEL METER
-// ====================================
-function startLevelMeter() {
-    const meterFill     = document.getElementById('meterFill');
-    const meterPeak     = document.getElementById('meterPeak');
-    const clipIndicator = document.getElementById('clipIndicator');
-    const peakValueEl   = document.getElementById('peakValue');
-    const rmsValueEl    = document.getElementById('rmsValue');
-    const bufLen        = analyser.frequencyBinCount;
-    const data          = new Float32Array(bufLen);
-    meterInterval = setInterval(() => {
-        analyser.getFloatTimeDomainData(data);
-        let sumSq = 0, peak = 0;
-        for (let i = 0; i < bufLen; i++) {
-            const s = Math.abs(data[i]); sumSq += data[i] * data[i]; if (s > peak) peak = s;
+function scheduleProgressUpdate() {
+    cancelAnimationFrame(progressRafId);
+    if (!isPlaying || isDragging) return;
+    syncProgressUI();
+    if (getCurrentOffset() < getDuration())
+        progressRafId = requestAnimationFrame(scheduleProgressUpdate);
+}
+
+// ── Seek ──────────────────────────────────────────────────────────────────────
+function seekToPosition(clientX) {
+    if (!audioBuffer) return;
+    const rect   = progressBar.getBoundingClientRect();
+    const ratio  = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    pauseOffset  = ratio * getDuration();
+    syncProgressUI(pauseOffset);
+}
+
+progressBar.addEventListener('mousedown', e => {
+    if (!audioBuffer) return;
+    isDragging = true; wasPausedBeforeDrag = !isPlaying;
+    if (isPlaying) pause();
+    seekToPosition(e.clientX); progressBar.style.cursor = 'grabbing';
+});
+progressBar.addEventListener('touchstart', e => {
+    if (!audioBuffer) return;
+    isDragging = true; wasPausedBeforeDrag = !isPlaying;
+    if (isPlaying) pause();
+    seekToPosition(e.touches[0].clientX);
+}, { passive: true });
+document.addEventListener('mousemove',  e => { if (isDragging) seekToPosition(e.clientX); });
+document.addEventListener('touchmove',  e => { if (isDragging) seekToPosition(e.touches[0].clientX); }, { passive: true });
+document.addEventListener('mouseup',    () => { if (!isDragging) return; isDragging = false; progressBar.style.cursor = 'pointer'; if (!wasPausedBeforeDrag) play(); });
+document.addEventListener('touchend',   () => { if (!isDragging) return; isDragging = false; if (!wasPausedBeforeDrag) play(); });
+
+// ── Sliders ───────────────────────────────────────────────────────────────────
+
+// Speed — só muda playbackRate do Player (não mexe no pitch)
+document.getElementById('speedSlider').addEventListener('input', e => {
+    const v = parseFloat(e.target.value);
+    document.getElementById('speedValue').textContent = v.toFixed(2) + 'x';
+    if (tonePlayer) {
+        if (isPlaying) {
+            // Recalcula pauseOffset para manter posição correta
+            pauseOffset = getCurrentOffset();
+            tonePlayer.playbackRate = v;
+            playStarted = Tone.now() - pauseOffset / v;
+        } else {
+            tonePlayer.playbackRate = v;
         }
-        const rms = Math.sqrt(sumSq / bufLen);
-        const rmsDb  = gainToDb(rms), peakDb = gainToDb(peak);
-        const rmsPct = Math.max(0, Math.min(100, ((rmsDb + 60) / 60) * 100));
-        if (meterFill)   meterFill.style.width = rmsPct + '%';
-        if (rmsValueEl)  rmsValueEl.textContent = rmsDb.toFixed(1) + ' dB';
-        if (peak > peakHold) { peakHold = peak; peakHoldTime = Date.now(); }
-        if (Date.now() - peakHoldTime > 1000) peakHold *= 0.95;
-        const pkPct = Math.max(0, Math.min(100, ((gainToDb(peakHold) + 60) / 60) * 100));
-        if (meterPeak)   meterPeak.style.left = pkPct + '%';
-        if (peakValueEl) peakValueEl.textContent = gainToDb(peakHold).toFixed(1) + ' dB';
-        if (peakDb > -1) {
-            if (clipIndicator) clipIndicator.classList.add('active');
-            clipCount++;
-            if (clipCount > 5) {
-                const cur = parseFloat(document.getElementById('outputGainSlider').value);
-                const nv  = Math.max(-12, cur - 1);
-                document.getElementById('outputGainSlider').value = nv;
-                document.getElementById('outputGainValue').textContent = nv.toFixed(1) + ' dB';
-                outputGainNode.gain.value = dbToGain(nv); clipCount = 0;
-            }
-        } else { if (clipIndicator) clipIndicator.classList.remove('active'); if (clipCount > 0) clipCount--; }
+    }
+    syncProgressUI();
+});
+
+// Pitch — só muda PitchShift.pitch (não mexe na velocidade)
+document.getElementById('pitchSlider').addEventListener('input', e => {
+    const v = parseFloat(e.target.value);
+    document.getElementById('pitchValue').textContent = v.toFixed(1) + ' st';
+    if (tonePitchShift) {
+        tonePitchShift.pitch = v;  // tempo real, sem rebuild
+    }
+});
+
+document.getElementById('volumeSlider').addEventListener('input', e => {
+    const v = parseFloat(e.target.value);
+    document.getElementById('volumeValue').textContent = v.toFixed(1) + '%';
+    if (toneGain) toneGain.gain.value = v / 100;
+});
+
+document.getElementById('bassSlider').addEventListener('input', e => {
+    const v = parseFloat(e.target.value);
+    document.getElementById('bassValue').textContent = v.toFixed(1) + ' dB';
+    if (toneBass) toneBass.gain.value = v;
+});
+
+document.getElementById('trebleSlider').addEventListener('input', e => {
+    const v = parseFloat(e.target.value);
+    document.getElementById('trebleValue').textContent = v.toFixed(1) + ' dB';
+    if (toneTreble) toneTreble.gain.value = v;
+});
+
+document.getElementById('panSlider').addEventListener('input', e => {
+    const v = parseFloat(e.target.value);
+    const av = Math.abs(v).toFixed(1);
+    document.getElementById('panValue').textContent = v === 0 ? 'Center' : v < 0 ? av + '% Left' : av + '% Right';
+    if (tonePan && !eightDEnabled) tonePan.pan.value = v / 100;
+});
+
+document.getElementById('reverbSlider').addEventListener('input', e => {
+    const v = parseFloat(e.target.value);
+    document.getElementById('reverbValue').textContent = v.toFixed(1) + '%';
+    if (toneReverb) toneReverb.wet.value = v / 100;
+});
+
+document.getElementById('echoSlider').addEventListener('input', e => {
+    const v = parseFloat(e.target.value);
+    document.getElementById('echoValue').textContent = v.toFixed(1) + '%';
+    if (toneDelay) {
+        toneDelay.wet.value      = v / 100;
+        toneDelay.feedback.value = Math.min(0.55, v / 100 * 0.5);
+    }
+});
+
+// Stubs para inputs ocultos de compatibilidade
+document.getElementById('preGainSlider').addEventListener('input', () => {});
+document.getElementById('outputGainSlider').addEventListener('input', () => {});
+document.getElementById('limiterToggle').addEventListener('click', () => {
+    limiterEnabled = !limiterEnabled;
+    document.getElementById('limiterToggle').classList.toggle('active');
+});
+
+// ── 8D Audio ──────────────────────────────────────────────────────────────────
+eightDToggle.addEventListener('click', () => {
+    eightDEnabled = !eightDEnabled;
+    eightDToggle.classList.toggle('active');
+    eightDToggle.setAttribute('aria-checked', String(eightDEnabled));
+    if (eightDEnabled) start8DAudio(); else stop8DAudio();
+});
+document.getElementById('eightDSpeed').addEventListener('input', e => {
+    document.getElementById('eightDSpeedValue').textContent = parseFloat(e.target.value).toFixed(1);
+    if (eightDEnabled) { stop8DAudio(); start8DAudio(); }
+});
+
+function start8DAudio() {
+    if (!tonePan) return;
+    const speed = parseFloat(document.getElementById('eightDSpeed').value);
+    let angle = 0;
+    eightDAudioInterval = setInterval(() => {
+        angle += 0.05 * speed;
+        if (tonePan) tonePan.pan.value = Math.sin(angle);
     }, 50);
 }
-
-function stopLevelMeter() {
-    if (meterInterval) { clearInterval(meterInterval); meterInterval = null; }
-    const ids = ['meterFill','meterPeak','peakValue','rmsValue','clipIndicator'];
-    const [mf, mp, pv, rv, ci] = ids.map(id => document.getElementById(id));
-    if (mf) mf.style.width = '0%'; if (mp) mp.style.left = '0%';
-    if (pv) pv.textContent = '-∞ dB'; if (rv) rv.textContent = '-∞ dB';
-    if (ci) ci.classList.remove('active');
+function stop8DAudio() {
+    if (eightDAudioInterval) { clearInterval(eightDAudioInterval); eightDAudioInterval = null; }
+    if (tonePan) tonePan.pan.value = parseFloat(document.getElementById('panSlider').value) / 100;
 }
 
-// ====================================
-// WAVEFORM
-// ====================================
+// ── Waveform / Visualize ──────────────────────────────────────────────────────
 function drawWaveform() {
     const w = waveformCanvas.width  = waveformCanvas.offsetWidth  * 2;
     const h = waveformCanvas.height = waveformCanvas.offsetHeight * 2;
@@ -464,7 +431,7 @@ function drawWaveform() {
     waveformCtx.strokeStyle = '#667eea'; waveformCtx.lineWidth = 2;
     for (let i = 0; i < w; i++) {
         let mn = 1, mx = -1;
-        for (let j = 0; j < step; j++) { const d = data[i*step+j]; if(d<mn)mn=d; if(d>mx)mx=d; }
+        for (let j = 0; j < step; j++) { const d = data[i*step+j]||0; if(d<mn)mn=d; if(d>mx)mx=d; }
         const y = (1 + mn) * amp;
         if (i === 0) waveformCtx.moveTo(i, y); else waveformCtx.lineTo(i, y);
     }
@@ -473,12 +440,12 @@ function drawWaveform() {
 
 function visualize() {
     const w = waveformCanvas.width, h = waveformCanvas.height;
-    const bufLen = analyser.frequencyBinCount;
+    const bufLen = analyserNode ? analyserNode.frequencyBinCount : 1024;
     const data   = new Uint8Array(bufLen);
     function draw() {
         if (!isPlaying) return;
         animationId = requestAnimationFrame(draw);
-        analyser.getByteTimeDomainData(data);
+        if (analyserNode) analyserNode.getByteTimeDomainData(data);
         waveformCtx.fillStyle = 'rgba(15,15,30,0.3)';
         waveformCtx.fillRect(0, 0, w, h);
         waveformCtx.lineWidth = 3; waveformCtx.strokeStyle = '#764ba2';
@@ -494,394 +461,205 @@ function visualize() {
     draw();
 }
 
-// ====================================
-// PROGRESS BAR / SEEK
-// ====================================
-function scheduleProgressUpdate() {
-    cancelAnimationFrame(progressRafId);
-    if (!isPlaying || isDragging) return;
-    const src = getCurrentSourceTime();
-    syncProgressUI(src);
-    if (pitchedBuffer && src < pitchedBuffer.duration)
-        progressRafId = requestAnimationFrame(scheduleProgressUpdate);
+// ── Level Meter ───────────────────────────────────────────────────────────────
+function startLevelMeter() {
+    if (!analyserNode) return;
+    const bufLen = analyserNode.frequencyBinCount;
+    const data   = new Float32Array(bufLen);
+    let peakHold = 0, peakHoldTime = 0, clipCount = 0;
+    meterInterval = setInterval(() => {
+        analyserNode.getFloatTimeDomainData(data);
+        let sumSq = 0, peak = 0;
+        for (let i = 0; i < bufLen; i++) { const s = Math.abs(data[i]); sumSq += data[i]*data[i]; if(s>peak)peak=s; }
+        const rms   = Math.sqrt(sumSq / bufLen);
+        const rmsDb = gainToDb(rms), peakDb = gainToDb(peak);
+        const rmsPct = Math.max(0, Math.min(100, ((rmsDb + 60) / 60) * 100));
+        const mf = document.getElementById('meterFill');
+        const rv = document.getElementById('rmsValue');
+        if (mf) mf.style.width = rmsPct + '%';
+        if (rv) rv.textContent  = rmsDb.toFixed(1) + ' dB';
+        if (peak > peakHold) { peakHold = peak; peakHoldTime = Date.now(); }
+        if (Date.now() - peakHoldTime > 1000) peakHold *= 0.95;
+        const pkPct = Math.max(0, Math.min(100, ((gainToDb(peakHold) + 60) / 60) * 100));
+        const mp = document.getElementById('meterPeak'); const pv = document.getElementById('peakValue');
+        if (mp) mp.style.left = pkPct + '%';
+        if (pv) pv.textContent = gainToDb(peakHold).toFixed(1) + ' dB';
+        const ci = document.getElementById('clipIndicator');
+        if (peakDb > -1) { if(ci)ci.classList.add('active'); clipCount++; }
+        else { if(ci)ci.classList.remove('active'); if(clipCount>0)clipCount--; }
+    }, 50);
+}
+function stopLevelMeter() {
+    if (meterInterval) { clearInterval(meterInterval); meterInterval = null; }
+    const mf=document.getElementById('meterFill'); const mp=document.getElementById('meterPeak');
+    const pv=document.getElementById('peakValue'); const rv=document.getElementById('rmsValue');
+    if(mf)mf.style.width='0%'; if(mp)mp.style.left='0%';
+    if(pv)pv.textContent='-∞ dB'; if(rv)rv.textContent='-∞ dB';
 }
 
-let isDragging = false, wasPausedBeforeDrag = false;
-
-function seekToPosition(clientX) {
-    if (!pitchedBuffer) return;
-    const rect = progressBar.getBoundingClientRect();
-    pauseTime = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * pitchedBuffer.duration;
-    syncProgressUI(pauseTime);
-}
-
-progressBar.addEventListener('mousedown', e => {
-    if (!pitchedBuffer) return;
-    isDragging = true; wasPausedBeforeDrag = !isPlaying;
-    if (isPlaying) pauseWithoutReset();
-    seekToPosition(e.clientX); progressBar.style.cursor = 'grabbing';
-});
-progressBar.addEventListener('touchstart', e => {
-    if (!pitchedBuffer) return;
-    isDragging = true; wasPausedBeforeDrag = !isPlaying;
-    if (isPlaying) pauseWithoutReset();
-    seekToPosition(e.touches[0].clientX);
-}, { passive: true });
-document.addEventListener('mousemove',  e => { if (isDragging) seekToPosition(e.clientX); });
-document.addEventListener('touchmove',  e => { if (isDragging) seekToPosition(e.touches[0].clientX); }, { passive: true });
-document.addEventListener('mouseup',    () => { if (!isDragging) return; isDragging = false; progressBar.style.cursor = 'pointer'; if (!wasPausedBeforeDrag) play(); });
-document.addEventListener('touchend',   () => { if (!isDragging) return; isDragging = false; if (!wasPausedBeforeDrag) play(); });
-
-// ====================================
-// SLIDERS
-// ====================================
-document.getElementById('preGainSlider').addEventListener('input', e => {
-    const v = parseFloat(e.target.value);
-    document.getElementById('preGainValue').textContent = v.toFixed(1) + ' dB';
-    if (preGainNode) preGainNode.gain.value = dbToGain(v);
-});
-
-document.getElementById('outputGainSlider').addEventListener('input', e => {
-    const v = parseFloat(e.target.value);
-    document.getElementById('outputGainValue').textContent = v.toFixed(1) + ' dB';
-    if (outputGainNode) outputGainNode.gain.value = dbToGain(v);
-    clipCount = 0;
-});
-
-const limiterToggle = document.getElementById('limiterToggle');
-limiterToggle.addEventListener('click', () => {
-    limiterEnabled = !limiterEnabled;
-    limiterToggle.classList.toggle('active');
-});
-
-document.getElementById('limiterThresholdSlider').addEventListener('input', e => {
-    const v = parseFloat(e.target.value);
-    document.getElementById('limiterThresholdValue').textContent = v.toFixed(1) + ' dB';
-    if (compressorNode) compressorNode.threshold.value = v;
-});
-
-document.getElementById('speedSlider').addEventListener('input', e => {
-    const v = parseFloat(e.target.value);
-    document.getElementById('speedValue').textContent = v.toFixed(2) + 'x';
-    if (pitchedBuffer) {
-        if (isPlaying && sourceNode) {
-            const cur = getCurrentSourceTime();
-            currentPlaybackRate = getSpeedValue();
-            sourceNode.playbackRate.value = currentPlaybackRate;
-            startTime = audioContext.currentTime - (cur / currentPlaybackRate);
-        } else {
-            currentPlaybackRate = getSpeedValue();
-        }
-        syncProgressUI();
-    }
-});
-
-// Pitch: rebuild buffer e reinicia a reprodução na mesma posição
-let pitchDebounceTimer = null;
-document.getElementById('pitchSlider').addEventListener('input', e => {
-    const v = parseFloat(e.target.value);
-    document.getElementById('pitchValue').textContent = v.toFixed(1) + ' st';
-    if (pitchProcessingInline) {
-        pitchProcessingInline.classList.add('visible');
-        pitchProcessingInline.setAttribute('aria-hidden', 'false');
-    }
-    clearTimeout(pitchDebounceTimer);
-    pitchDebounceTimer = setTimeout(async () => {
-        if (!audioBuffer) { setPitchProcessing(false); return; }
-        const wasPlaying = isPlaying;
-        const savedTime  = getCurrentSourceTime();
-        if (isPlaying) pauseWithoutReset();
-        setPitchProcessing(true);
-        await buildPitchedBuffer();
-        setPitchProcessing(false);
-        pauseTime = savedTime;
-        syncProgressUI(savedTime);
-        if (wasPlaying) play();
-    }, 300);
-});
-
-document.getElementById('volumeSlider').addEventListener('input', e => {
-    const v = parseFloat(e.target.value);
-    document.getElementById('volumeValue').textContent = v.toFixed(1) + '%';
-    if (gainNode) gainNode.gain.value = v / 100;
-});
-
-document.getElementById('bassSlider').addEventListener('input', e => {
-    const v = parseFloat(e.target.value);
-    document.getElementById('bassValue').textContent = v.toFixed(1) + ' dB';
-    if (bassFilter) bassFilter.gain.value = Math.min(v, 15);
-});
-
-document.getElementById('trebleSlider').addEventListener('input', e => {
-    const v = parseFloat(e.target.value);
-    document.getElementById('trebleValue').textContent = v.toFixed(1) + ' dB';
-    if (trebleFilter) trebleFilter.gain.value = v;
-});
-
-document.getElementById('panSlider').addEventListener('input', e => {
-    const v = parseFloat(e.target.value);
-    const av = Math.abs(v).toFixed(1);
-    document.getElementById('panValue').textContent = v === 0 ? 'Center' : v < 0 ? av + '% Left' : av + '% Right';
-    if (panNode && !eightDEnabled) panNode.pan.value = v / 100;
-});
-
-document.getElementById('reverbSlider').addEventListener('input', e => {
-    const v = parseFloat(e.target.value);
-    document.getElementById('reverbValue').textContent = v.toFixed(1) + '%';
-    const wet = v / 100;
-    if (reverbDryGain) reverbDryGain.gain.value = 1 - wet;
-    if (reverbWetGain) reverbWetGain.gain.value = wet * 0.6;
-    if (convolverNode) createReverbImpulse(2, Math.max(0.001, v / 20));
-});
-
-document.getElementById('echoSlider').addEventListener('input', e => {
-    const v = parseFloat(e.target.value);
-    document.getElementById('echoValue').textContent = v.toFixed(1) + '%';
-    if (delayGain) delayGain.gain.value = Math.min(0.55, v / 100 * 0.5);
-});
-
-const eightDToggle = document.getElementById('eightDToggle');
-eightDToggle.addEventListener('click', () => {
-    eightDEnabled = !eightDEnabled;
-    eightDToggle.classList.toggle('active');
-    eightDToggle.setAttribute('aria-checked', eightDEnabled);
-    if (eightDEnabled) start8DAudio(); else stop8DAudio();
-});
-
-document.getElementById('eightDSpeed').addEventListener('input', e => {
-    const v = parseFloat(e.target.value);
-    document.getElementById('eightDSpeedValue').textContent = v.toFixed(1);
-    if (eightDEnabled) { stop8DAudio(); start8DAudio(); }
-});
-
-// ====================================
-// 8D AUDIO
-// ====================================
-function start8DAudio() {
-    if (!panNode) return;
-    const speed = parseFloat(document.getElementById('eightDSpeed').value);
-    let angle = 0;
-    eightDAudioInterval = setInterval(() => { angle += 0.05 * speed; if (panNode) panNode.pan.value = Math.sin(angle); }, 50);
-}
-function stop8DAudio() {
-    if (eightDAudioInterval) { clearInterval(eightDAudioInterval); eightDAudioInterval = null; }
-    if (panNode) panNode.pan.value = parseFloat(document.getElementById('panSlider').value) / 100;
-}
-
-// ====================================
-// PRESETS
-// ====================================
+// ── Presets ───────────────────────────────────────────────────────────────────
 const presets = {
-    normal:     { speed:1.00, pitch:  0, volume:100, bass: 0, treble: 0, pan:0, reverb:  0, echo: 0, eightD:false, preGain: -9, outputGain:-1 },
-    nightcore:  { speed:1.30, pitch:  3, volume:100, bass: 0, treble: 5, pan:0, reverb: 10, echo: 0, eightD:false, preGain:-12, outputGain:-2 },
-    deepbass:   { speed:0.90, pitch: -3, volume:110, bass:12, treble:-5, pan:0, reverb: 15, echo: 5, eightD:false, preGain:-15, outputGain:-3 },
-    '8daudio':  { speed:1.00, pitch:  0, volume:100, bass: 3, treble: 2, pan:0, reverb: 25, echo:15, eightD:true,  preGain:-12, outputGain:-2 },
-    concert:    { speed:1.00, pitch:  0, volume:105, bass: 8, treble: 4, pan:0, reverb: 60, echo:20, eightD:false, preGain:-15, outputGain:-3 },
-    slowcore:   { speed:0.72, pitch: -2, volume:100, bass: 4, treble:-2, pan:0, reverb: 65, echo:12, eightD:false, preGain:-12, outputGain:-2 },
-    lofi:       { speed:0.92, pitch: -1, volume: 95, bass: 6, treble:-4, pan:0, reverb: 30, echo: 8, eightD:false, preGain:-12, outputGain:-2 },
-    vaporwave:  { speed:0.80, pitch: -4, volume:100, bass: 5, treble: 0, pan:0, reverb: 50, echo:18, eightD:false, preGain:-12, outputGain:-2 },
-    phonecall:  { speed:1.00, pitch:  2, volume:100, bass:-8, treble: 6, pan:0, reverb:  5, echo: 0, eightD:false, preGain: -6, outputGain: 0 },
-    underwater: { speed:0.85, pitch: -5, volume:100, bass: 8, treble:-8, pan:0, reverb: 80, echo:30, eightD:false, preGain:-15, outputGain:-3 },
+    normal:     { speed:1.00, pitch:  0, volume:100, bass: 0, treble: 0, pan:0, reverb:  0, echo: 0, eightD:false },
+    nightcore:  { speed:1.30, pitch:  3, volume:100, bass: 0, treble: 5, pan:0, reverb: 10, echo: 0, eightD:false },
+    deepbass:   { speed:0.90, pitch: -3, volume:110, bass:12, treble:-5, pan:0, reverb: 15, echo: 5, eightD:false },
+    '8daudio':  { speed:1.00, pitch:  0, volume:100, bass: 3, treble: 2, pan:0, reverb: 25, echo:15, eightD:true  },
+    concert:    { speed:1.00, pitch:  0, volume:105, bass: 8, treble: 4, pan:0, reverb: 60, echo:20, eightD:false },
+    slowcore:   { speed:0.72, pitch: -2, volume:100, bass: 4, treble:-2, pan:0, reverb: 65, echo:12, eightD:false },
+    lofi:       { speed:0.92, pitch: -1, volume: 95, bass: 6, treble:-4, pan:0, reverb: 30, echo: 8, eightD:false },
+    vaporwave:  { speed:0.80, pitch: -4, volume:100, bass: 5, treble: 0, pan:0, reverb: 50, echo:18, eightD:false },
+    phonecall:  { speed:1.00, pitch:  2, volume:100, bass:-8, treble: 6, pan:0, reverb:  5, echo: 0, eightD:false },
+    underwater: { speed:0.85, pitch: -5, volume:100, bass: 8, treble:-8, pan:0, reverb: 80, echo:30, eightD:false },
 };
 
 document.querySelectorAll('.preset-btn').forEach(btn => {
     btn.addEventListener('click', () => { const p = presets[btn.dataset.preset]; if (p) applyPreset(p); });
 });
 
-async function applyPreset(p) {
-    document.getElementById('speedSlider').value   = p.speed;
-    document.getElementById('speedValue').textContent  = p.speed.toFixed(2) + 'x';
-    document.getElementById('pitchSlider').value   = p.pitch;
-    document.getElementById('pitchValue').textContent  = p.pitch.toFixed(1) + ' st';
-    document.getElementById('volumeSlider').value  = p.volume;
+function applyPreset(p) {
+    document.getElementById('speedSlider').value  = p.speed;
+    document.getElementById('speedValue').textContent = p.speed.toFixed(2) + 'x';
+    document.getElementById('pitchSlider').value  = p.pitch;
+    document.getElementById('pitchValue').textContent = p.pitch.toFixed(1) + ' st';
+    document.getElementById('volumeSlider').value = p.volume;
     document.getElementById('volumeValue').textContent = p.volume.toFixed(1) + '%';
-    document.getElementById('bassSlider').value    = p.bass;
-    document.getElementById('bassValue').textContent   = p.bass.toFixed(1) + ' dB';
-    document.getElementById('trebleSlider').value  = p.treble;
+    document.getElementById('bassSlider').value   = p.bass;
+    document.getElementById('bassValue').textContent  = p.bass.toFixed(1) + ' dB';
+    document.getElementById('trebleSlider').value = p.treble;
     document.getElementById('trebleValue').textContent = p.treble.toFixed(1) + ' dB';
-    document.getElementById('panSlider').value     = p.pan;
-    document.getElementById('panValue').textContent    = 'Center';
-    document.getElementById('reverbSlider').value  = p.reverb;
+    document.getElementById('panSlider').value    = p.pan;
+    document.getElementById('panValue').textContent   = 'Center';
+    document.getElementById('reverbSlider').value = p.reverb;
     document.getElementById('reverbValue').textContent = p.reverb.toFixed(1) + '%';
-    document.getElementById('echoSlider').value    = p.echo;
-    document.getElementById('echoValue').textContent   = p.echo.toFixed(1) + '%';
-    document.getElementById('preGainSlider').value     = p.preGain;
-    document.getElementById('preGainValue').textContent= p.preGain.toFixed(1) + ' dB';
-    document.getElementById('outputGainSlider').value      = p.outputGain;
-    document.getElementById('outputGainValue').textContent = p.outputGain.toFixed(1) + ' dB';
+    document.getElementById('echoSlider').value   = p.echo;
+    document.getElementById('echoValue').textContent  = p.echo.toFixed(1) + '%';
 
-    if (gainNode)       gainNode.gain.value       = p.volume / 100;
-    if (bassFilter)     bassFilter.gain.value     = p.bass;
-    if (trebleFilter)   trebleFilter.gain.value   = p.treble;
-    if (panNode)        panNode.pan.value         = p.pan / 100;
-    if (delayGain)      delayGain.gain.value      = Math.min(0.55, p.echo / 100 * 0.5);
-    if (preGainNode)    preGainNode.gain.value    = dbToGain(p.preGain);
-    if (outputGainNode) outputGainNode.gain.value = dbToGain(p.outputGain);
-    const wet = p.reverb / 100;
-    if (reverbDryGain)  reverbDryGain.gain.value  = 1 - wet;
-    if (reverbWetGain)  reverbWetGain.gain.value  = wet * 0.6;
-    if (convolverNode)  createReverbImpulse(2, Math.max(0.001, p.reverb / 20));
+    if (toneGain)      toneGain.gain.value       = p.volume / 100;
+    if (toneBass)      toneBass.gain.value        = p.bass;
+    if (toneTreble)    toneTreble.gain.value      = p.treble;
+    if (tonePan && !p.eightD) tonePan.pan.value   = p.pan / 100;
+    if (toneDelay)     { toneDelay.wet.value = p.echo/100; toneDelay.feedback.value = Math.min(0.55, p.echo/100*0.5); }
+    if (toneReverb)    toneReverb.wet.value        = p.reverb / 100;
+    if (tonePitchShift) tonePitchShift.pitch       = p.pitch;
+    if (tonePlayer)    tonePlayer.playbackRate     = p.speed;
 
     if (p.eightD && !eightDEnabled)      eightDToggle.click();
     else if (!p.eightD && eightDEnabled) eightDToggle.click();
 
-    if (audioBuffer) {
-        const wasPlaying = isPlaying;
-        const savedTime  = getCurrentSourceTime();
-        if (isPlaying) pauseWithoutReset();
-        setPitchProcessing(true);
-        await buildPitchedBuffer();
-        setPitchProcessing(false);
-        currentPlaybackRate = getSpeedValue();
-        pauseTime = savedTime;
-        syncProgressUI(savedTime);
-        if (wasPlaying) play();
-        else syncProgressUI();
-    }
+    syncProgressUI();
 }
 
-// ====================================
-// BUTTONS
-// ====================================
-playBtn.addEventListener('click',  play);
-stopBtn.addEventListener('click',  stop);
+// ── Buttons ───────────────────────────────────────────────────────────────────
+playBtn.addEventListener('click', play);
+stopBtn.addEventListener('click', stop);
 resetBtn.addEventListener('click', () => applyPreset(presets.normal));
 
-// ====================================
-// DOWNLOAD / EXPORT
-// ====================================
+// ── Export / Download ─────────────────────────────────────────────────────────
+// Para export, usa OfflineAudioContext + buildPitchedBufferForExport
+// que aplica pitch via phase vocoder (OLA) independente da velocidade.
 downloadBtn.addEventListener('click', async () => {
-    if (!audioBuffer) { alert('Please load an audio file first'); return; }
+    if (!audioBuffer) { alert('Carregue um arquivo de áudio primeiro.'); return; }
     try {
         downloadBtn.querySelector('span').textContent = 'Processing...';
         downloadBtn.disabled = true;
 
-        const pitchSemitones = parseFloat(document.getElementById('pitchSlider').value);
-        const speed          = parseFloat(document.getElementById('speedSlider').value);
+        const pitch = getPitchSemitones();
+        const speed = getSpeedValue();
+        const sr    = audioBuffer.sampleRate;
+        const nCh   = audioBuffer.numberOfChannels;
 
-        // Etapa 1: aplica pitch via phase vocoder (mesma lógica do buildPitchedBuffer)
-        let pitchedOut;
-        if (Math.abs(pitchSemitones) < 0.001) {
-            pitchedOut = audioBuffer;
+        // Etapa 1: pitch shift offline via OLA (mesmo algoritmo do Tone.js)
+        let pitchedBuf;
+        if (Math.abs(pitch) < 0.01) {
+            pitchedBuf = audioBuffer;
         } else {
-            const pitchRatio = Math.pow(2, pitchSemitones / 12);
-            const frameSize  = 2048;
-            const hopOut     = 512;
-            const hopIn      = hopOut * pitchRatio;
-            const nCh        = audioBuffer.numberOfChannels;
-            const inLen      = audioBuffer.length;
-            const outLen     = Math.ceil(inLen / pitchRatio);
-            const win        = new Float32Array(frameSize);
+            const ratio     = Math.pow(2, pitch / 12);
+            const frameSize = 2048;
+            const hopOut    = 512;
+            const hopIn     = hopOut * ratio;
+            const inLen     = audioBuffer.length;
+            const outLen    = Math.ceil(inLen / ratio);
+            const win       = new Float32Array(frameSize);
             for (let i = 0; i < frameSize; i++)
-                win[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (frameSize - 1)));
-            const outArrays = Array.from({ length: nCh }, () => new Float32Array(outLen));
+                win[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (frameSize - 1)));
+            const outs = Array.from({length: nCh}, () => new Float32Array(outLen));
             for (let ch = 0; ch < nCh; ch++) {
-                const inData = audioBuffer.getChannelData(ch);
-                const outData = outArrays[ch];
+                const inp = audioBuffer.getChannelData(ch), out = outs[ch];
                 let inPos = 0, outPos = 0;
                 while (outPos + frameSize <= outLen) {
-                    const inIdx = Math.round(inPos);
+                    const base = Math.round(inPos);
                     for (let i = 0; i < frameSize; i++) {
-                        const s = inIdx + i;
-                        outData[outPos + i] += (s < inLen ? inData[s] : 0) * win[i];
+                        const s = base + i;
+                        out[outPos + i] += (s < inLen ? inp[s] : 0) * win[i];
                     }
                     inPos += hopIn; outPos += hopOut;
                 }
             }
-            const stretchedBuf = audioContext.createBuffer(nCh, outLen, audioBuffer.sampleRate);
-            for (let ch = 0; ch < nCh; ch++) stretchedBuf.getChannelData(ch).set(outArrays[ch]);
-            const pitchCtx  = new OfflineAudioContext(nCh, inLen, audioContext.sampleRate);
-            const pitchSrc  = pitchCtx.createBufferSource();
-            pitchSrc.buffer = stretchedBuf;
-            pitchSrc.playbackRate.value = pitchRatio;
-            pitchSrc.connect(pitchCtx.destination);
-            pitchSrc.start(0);
-            pitchedOut = await pitchCtx.startRendering();
+            const stretched = audioContext.createBuffer(nCh, outLen, sr);
+            for (let ch = 0; ch < nCh; ch++) stretched.getChannelData(ch).set(outs[ch]);
+            const oCtx  = new OfflineAudioContext(nCh, inLen, sr);
+            const oSrc  = oCtx.createBufferSource();
+            oSrc.buffer = stretched;
+            oSrc.playbackRate.value = ratio;
+            oSrc.connect(oCtx.destination);
+            oSrc.start(0);
+            pitchedBuf = await oCtx.startRendering();
         }
 
-        // Etapa 2: aplica velocidade + efeitos
-        const finalLen    = Math.ceil(pitchedOut.length / speed);
-        const offlineCtx  = new OfflineAudioContext(2, finalLen, audioContext.sampleRate);
-        const offlineSrc  = offlineCtx.createBufferSource();
-        offlineSrc.buffer = pitchedOut;
-        offlineSrc.playbackRate.value = speed;
+        // Etapa 2: speed + EQ + reverb + echo offline
+        const finalLen   = Math.ceil(pitchedBuf.length / speed);
+        const offCtx     = new OfflineAudioContext(2, finalLen, sr);
+        const src        = offCtx.createBufferSource();
+        src.buffer       = pitchedBuf;
+        src.playbackRate.value = speed;
 
-        const offlinePreGain = offlineCtx.createGain();
-        offlinePreGain.gain.value = dbToGain(parseFloat(document.getElementById('preGainSlider').value));
+        const bass   = offCtx.createBiquadFilter(); bass.type='lowshelf';  bass.frequency.value=200;  bass.gain.value=parseFloat(document.getElementById('bassSlider').value);
+        const treble = offCtx.createBiquadFilter(); treble.type='highshelf'; treble.frequency.value=3000; treble.gain.value=parseFloat(document.getElementById('trebleSlider').value);
+        const pan    = offCtx.createStereoPanner ? offCtx.createStereoPanner() : null;
+        if (pan && !eightDEnabled) pan.pan.value = parseFloat(document.getElementById('panSlider').value) / 100;
+        const gainN  = offCtx.createGain(); gainN.gain.value = parseFloat(document.getElementById('volumeSlider').value) / 100;
 
-        const offlineBass = offlineCtx.createBiquadFilter();
-        offlineBass.type = 'lowshelf'; offlineBass.frequency.value = 200;
-        offlineBass.gain.value = parseFloat(document.getElementById('bassSlider').value);
+        const echoV  = parseFloat(document.getElementById('echoSlider').value);
+        const delay  = offCtx.createDelay(5.0); delay.delayTime.value = 0.3;
+        const dGain  = offCtx.createGain(); dGain.gain.value = Math.min(0.55, echoV/100*0.5);
 
-        const offlineMid = offlineCtx.createBiquadFilter();
-        offlineMid.type = 'peaking'; offlineMid.frequency.value = 1000; offlineMid.Q.value = 0.8; offlineMid.gain.value = 0;
-
-        const offlineTreble = offlineCtx.createBiquadFilter();
-        offlineTreble.type = 'highshelf'; offlineTreble.frequency.value = 3000;
-        offlineTreble.gain.value = parseFloat(document.getElementById('trebleSlider').value);
-
-        const offlinePan = offlineCtx.createStereoPanner ? offlineCtx.createStereoPanner() : null;
-        if (offlinePan) offlinePan.pan.value = eightDEnabled ? 0 : parseFloat(document.getElementById('panSlider').value) / 100;
-
-        const offlineGain = offlineCtx.createGain();
-        offlineGain.gain.value = parseFloat(document.getElementById('volumeSlider').value) / 100;
-
-        const echoValue = parseFloat(document.getElementById('echoSlider').value);
-        const offlineDelay = offlineCtx.createDelay(5.0); offlineDelay.delayTime.value = 0.3;
-        const offlineDelayGain = offlineCtx.createGain();
-        offlineDelayGain.gain.value = Math.min(0.55, echoValue / 100 * 0.5);
-
-        const offlineConvolver = offlineCtx.createConvolver();
-        const offlineRevDry   = offlineCtx.createGain();
-        const offlineRevWet   = offlineCtx.createGain();
-        const reverbValue     = parseFloat(document.getElementById('reverbSlider').value) / 100;
-        offlineRevDry.gain.value = 1 - reverbValue;
-        offlineRevWet.gain.value = reverbValue * 0.6;
-        const revLen = offlineCtx.sampleRate * 2;
-        const revImpulse = offlineCtx.createBuffer(2, revLen, offlineCtx.sampleRate);
-        const decayVal = Math.max(0.001, reverbValue * 20);
-        for (let ch = 0; ch < 2; ch++) {
-            const d = revImpulse.getChannelData(ch);
-            for (let i = 0; i < revLen; i++) d[i] = (Math.random() * 2 - 1) * Math.pow((revLen - i) / revLen, decayVal);
+        const conv   = offCtx.createConvolver();
+        const rDry   = offCtx.createGain();
+        const rWet   = offCtx.createGain();
+        const revV   = parseFloat(document.getElementById('reverbSlider').value) / 100;
+        rDry.gain.value = 1 - revV; rWet.gain.value = revV * 0.6;
+        const rLen   = sr * 2;
+        const rImp   = offCtx.createBuffer(2, rLen, sr);
+        for (let c = 0; c < 2; c++) {
+            const d = rImp.getChannelData(c);
+            for (let i = 0; i < rLen; i++) d[i] = (Math.random()*2-1) * Math.pow((rLen-i)/rLen, Math.max(0.001, revV*20));
         }
-        offlineConvolver.buffer = revImpulse;
+        conv.buffer = rImp;
 
-        const offlineComp = offlineCtx.createDynamicsCompressor();
-        offlineComp.threshold.value = -3; offlineComp.knee.value = 6;
-        offlineComp.ratio.value = 12; offlineComp.attack.value = 0.003; offlineComp.release.value = 0.25;
+        const comp   = offCtx.createDynamicsCompressor();
+        comp.threshold.value=-3; comp.knee.value=6; comp.ratio.value=12; comp.attack.value=0.003; comp.release.value=0.25;
+        const outG   = offCtx.createGain(); outG.gain.value = 0.944;
 
-        const offlineOut = offlineCtx.createGain();
-        offlineOut.gain.value = dbToGain(parseFloat(document.getElementById('outputGainSlider').value));
+        src.connect(bass); bass.connect(treble); treble.connect(pan||gainN);
+        if (pan) pan.connect(gainN);
+        gainN.connect(delay); delay.connect(dGain); dGain.connect(delay); dGain.connect(gainN);
+        const merger = offCtx.createGain();
+        gainN.connect(rDry); rDry.connect(merger);
+        if (revV > 0) { gainN.connect(conv); conv.connect(rWet); rWet.connect(merger); }
+        merger.connect(comp); comp.connect(outG); outG.connect(offCtx.destination);
+        src.start(0);
 
-        offlineSrc.connect(offlinePreGain);
-        offlinePreGain.connect(offlineBass); offlineBass.connect(offlineMid); offlineMid.connect(offlineTreble);
-        let cn = offlineTreble;
-        if (offlinePan) { cn.connect(offlinePan); cn = offlinePan; }
-        cn.connect(offlineGain);
-        if (echoValue > 0) {
-            offlineGain.connect(offlineDelay); offlineDelay.connect(offlineDelayGain);
-            offlineDelayGain.connect(offlineDelay); offlineDelayGain.connect(offlineGain);
-        }
-        const offlineMerger = offlineCtx.createGain();
-        offlineGain.connect(offlineRevDry); offlineRevDry.connect(offlineMerger);
-        if (reverbValue > 0) {
-            offlineGain.connect(offlineConvolver); offlineConvolver.connect(offlineRevWet); offlineRevWet.connect(offlineMerger);
-        }
-        offlineMerger.connect(offlineComp); offlineComp.connect(offlineOut); offlineOut.connect(offlineCtx.destination);
-        offlineSrc.start();
-
-        let rendered = await offlineCtx.startRendering();
+        let rendered = await offCtx.startRendering();
 
         // Normalização
-        let maxPeak = 0;
-        for (let ch = 0; ch < rendered.numberOfChannels; ch++) {
-            const d = rendered.getChannelData(ch);
-            for (let i = 0; i < d.length; i++) if (Math.abs(d[i]) > maxPeak) maxPeak = Math.abs(d[i]);
+        let maxP = 0;
+        for (let c = 0; c < rendered.numberOfChannels; c++) {
+            const d = rendered.getChannelData(c);
+            for (let i = 0; i < d.length; i++) if (Math.abs(d[i]) > maxP) maxP = Math.abs(d[i]);
         }
-        const ng = maxPeak > 0.05 ? (0.944 / maxPeak) : 1;
-        if (ng < 1.5) {
-            for (let ch = 0; ch < rendered.numberOfChannels; ch++) {
-                const d = rendered.getChannelData(ch);
+        if (maxP > 0.05 && maxP < 1.5) {
+            const ng = 0.944 / maxP;
+            for (let c = 0; c < rendered.numberOfChannels; c++) {
+                const d = rendered.getChannelData(c);
                 for (let i = 0; i < d.length; i++) d[i] = Math.max(-1, Math.min(1, d[i] * ng));
             }
         }
@@ -890,74 +668,49 @@ downloadBtn.addEventListener('click', async () => {
         const blob = new Blob([wav], { type: 'audio/wav' });
         const url  = URL.createObjectURL(blob);
         const a    = document.createElement('a');
-        a.href = url;
+        a.href     = url;
         const fx = [];
-        if (speed !== 1.0) fx.push(speed + 'x');
-        if (pitchSemitones !== 0) fx.push((pitchSemitones > 0 ? '+' : '') + pitchSemitones + 'st');
-        if (parseFloat(document.getElementById('bassSlider').value)   > 0) fx.push('bass');
-        if (parseFloat(document.getElementById('reverbSlider').value) > 0) fx.push('reverb');
-        if (parseFloat(document.getElementById('echoSlider').value)   > 0) fx.push('echo');
+        if (speed !== 1.0)  fx.push(speed + 'x');
+        if (pitch !== 0)    fx.push((pitch > 0 ? '+' : '') + pitch + 'st');
         a.download = 'edited_' + currentFileName.replace(/\.[^/.]+$/, '') + (fx.length ? '_' + fx.join('_') : '') + '.wav';
         a.click(); URL.revokeObjectURL(url);
-    } catch (err) {
-        console.error('Export error:', err);
-        alert('Failed to export audio: ' + err.message);
+    } catch(err) {
+        console.error('Erro de export:', err);
+        alert('Falha ao exportar: ' + err.message);
     } finally {
         downloadBtn.querySelector('span').textContent = 'Export';
         downloadBtn.disabled = false;
     }
 });
 
-// ====================================
-// WAV ENCODER
-// ====================================
+// ── WAV Encoder ───────────────────────────────────────────────────────────────
 function audioBufferToWav(buffer) {
     const nCh = buffer.numberOfChannels, len = buffer.length * nCh * 2;
     const ab = new ArrayBuffer(44 + len), view = new DataView(ab);
-    const ws = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
-    ws(0,'RIFF'); view.setUint32(4, 36 + len, true);
+    const ws = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o+i, s.charCodeAt(i)); };
+    ws(0,'RIFF'); view.setUint32(4, 36+len, true);
     ws(8,'WAVE'); ws(12,'fmt ');
-    view.setUint32(16, 16, true); view.setUint16(20, 1, true);
-    view.setUint16(22, nCh, true); view.setUint32(24, buffer.sampleRate, true);
-    view.setUint32(28, buffer.sampleRate * nCh * 2, true);
-    view.setUint16(32, nCh * 2, true); view.setUint16(34, 16, true);
-    ws(36,'data'); view.setUint32(40, len, true);
-    const chs = Array.from({length: nCh}, (_, i) => buffer.getChannelData(i));
+    view.setUint32(16,16,true); view.setUint16(20,1,true);
+    view.setUint16(22,nCh,true); view.setUint32(24,buffer.sampleRate,true);
+    view.setUint32(28,buffer.sampleRate*nCh*2,true);
+    view.setUint16(32,nCh*2,true); view.setUint16(34,16,true);
+    ws(36,'data'); view.setUint32(40,len,true);
+    const chs = Array.from({length:nCh},(_,i)=>buffer.getChannelData(i));
     let off = 44;
     for (let i = 0; i < buffer.length; i++)
         for (let c = 0; c < nCh; c++) {
-            const s = Math.max(-1, Math.min(1, chs[c][i]));
-            view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true); off += 2;
+            const s = Math.max(-1,Math.min(1,chs[c][i]));
+            view.setInt16(off, s<0 ? s*0x8000 : s*0x7FFF, true); off += 2;
         }
     return ab;
 }
 
-// ====================================
-// UTILS
-// ====================================
-function formatTime(s) {
-    if (!isFinite(s) || s < 0) return '0:00';
-    const m = Math.floor(s / 60), sec = Math.floor(s % 60);
-    return m + ':' + (sec < 10 ? '0' : '') + sec;
-}
-function dbToGain(db) { return Math.pow(10, db / 20); }
-function gainToDb(g)  { return 20 * Math.log10(Math.max(g, 0.00001)); }
-
-window.addEventListener('resize', () => { if (audioBuffer) drawWaveform(); });
-waveformCanvas.width  = waveformCanvas.offsetWidth  * 2;
-waveformCanvas.height = waveformCanvas.offsetHeight * 2;
-
-// ====================================
-// KEYBOARD SHORTCUTS
-// ====================================
+// ── Keyboard Shortcuts ────────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
-    if (!pitchedBuffer) return;
-    if (isPitchProcessing) return;
-    const tag  = e.target.tagName.toLowerCase();
-    const type = (e.target.type || '').toLowerCase();
-    if (tag === 'textarea') return;
-    if (tag === 'input' && type !== 'range') return;
-    if (tag === 'button' || (tag === 'input' && type === 'range')) e.target.blur();
+    if (!audioBuffer) return;
+    const tag = e.target.tagName.toLowerCase();
+    if (tag==='textarea') return;
+    if (tag==='input' && e.target.type!=='range') return;
     switch (e.key) {
         case ' ': case 'k': case 'K': e.preventDefault(); play(); break;
         case 'ArrowLeft':  e.preventDefault(); seekRelative(-5);  break;
@@ -965,7 +718,7 @@ document.addEventListener('keydown', e => {
         case 'j': case 'J': e.preventDefault(); seekRelative(-10); break;
         case 'l': case 'L': e.preventDefault(); seekRelative(10);  break;
         case 'Home': e.preventDefault(); seekTo(0); break;
-        case 'End':  e.preventDefault(); seekTo(pitchedBuffer.duration); break;
+        case 'End':  e.preventDefault(); seekTo(getDuration()); break;
         case 'ArrowUp':   e.preventDefault(); changeVolume(5);  break;
         case 'ArrowDown': e.preventDefault(); changeVolume(-5); break;
         case 'm': case 'M': e.preventDefault(); toggleMute(); break;
@@ -973,41 +726,53 @@ document.addEventListener('keydown', e => {
 });
 
 function seekRelative(s) {
-    if (!pitchedBuffer) return;
-    const newTime = Math.max(0, Math.min(pitchedBuffer.duration, getCurrentSourceTime() + s));
+    if (!audioBuffer) return;
     const was = isPlaying;
-    if (isPlaying) pauseWithoutReset();
-    pauseTime = newTime; syncProgressUI(pauseTime);
+    if (isPlaying) pause();
+    pauseOffset = Math.max(0, Math.min(getDuration(), getCurrentOffset() + s));
+    syncProgressUI(pauseOffset);
     if (was) play();
 }
 function seekTo(t) {
-    if (!pitchedBuffer) return;
-    const newTime = Math.max(0, Math.min(pitchedBuffer.duration, t));
+    if (!audioBuffer) return;
     const was = isPlaying;
-    if (isPlaying) pauseWithoutReset();
-    pauseTime = newTime; syncProgressUI(pauseTime);
+    if (isPlaying) pause();
+    pauseOffset = Math.max(0, Math.min(getDuration(), t));
+    syncProgressUI(pauseOffset);
     if (was) play();
 }
 
-let previousVolume = 100, isMuted = false;
 function changeVolume(d) {
     const sl = document.getElementById('volumeSlider');
     const nv = Math.max(0, Math.min(150, parseFloat(sl.value) + d));
     sl.value = nv; document.getElementById('volumeValue').textContent = nv.toFixed(1) + '%';
-    if (gainNode) gainNode.gain.value = nv / 100;
+    if (toneGain) toneGain.gain.value = nv / 100;
 }
 function toggleMute() {
     const sl = document.getElementById('volumeSlider');
     if (isMuted) {
         sl.value = previousVolume;
         document.getElementById('volumeValue').textContent = previousVolume.toFixed(1) + '%';
-        if (gainNode) gainNode.gain.value = previousVolume / 100;
+        if (toneGain) toneGain.gain.value = previousVolume / 100;
         isMuted = false;
     } else {
         previousVolume = parseFloat(sl.value); sl.value = 0;
         document.getElementById('volumeValue').textContent = '0% (Muted)';
-        if (gainNode) gainNode.gain.value = 0; isMuted = true;
+        if (toneGain) toneGain.gain.value = 0; isMuted = true;
     }
 }
 
-console.log('🎵 Audio Editor — pitch via Phase Vocoder (OLA) ✅');
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function formatTime(s) {
+    if (!isFinite(s) || s < 0) return '0:00';
+    const m = Math.floor(s/60), sec = Math.floor(s%60);
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+function gainToDb(g)  { return 20 * Math.log10(Math.max(g, 0.00001)); }
+function dbToGain(db) { return Math.pow(10, db / 20); }
+
+window.addEventListener('resize', () => { if (audioBuffer) drawWaveform(); });
+waveformCanvas.width  = waveformCanvas.offsetWidth  * 2;
+waveformCanvas.height = waveformCanvas.offsetHeight * 2;
+
+console.log('🎵 Audio Editor — Tone.js PitchShift (phase vocoder real) ✅');
