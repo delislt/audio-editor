@@ -39,6 +39,7 @@ let peakHold = 0;
 let peakHoldTime = 0;
 let currentPlaybackRate = 1.0;
 let pitchBuildPending = false; // evita reconstrução em cascata
+let isPitchProcessing = false; // controla o estado de processamento de pitch
 
 // DOM Elements
 const uploadSection  = document.getElementById('uploadSection');
@@ -58,9 +59,34 @@ const waveformCanvas = document.getElementById('waveform');
 const waveformCtx    = waveformCanvas.getContext('2d');
 const playIcon       = document.getElementById('playIcon');
 const pauseIcon      = document.getElementById('pauseIcon');
+const pitchProcessingBanner = document.getElementById('pitchProcessingBanner');
+const pitchProcessingInline = document.getElementById('pitchProcessingInline');
 
 function showPlayIcon()  { playIcon.style.display = ''; pauseIcon.style.display = 'none'; }
 function showPauseIcon() { playIcon.style.display = 'none'; pauseIcon.style.display = ''; }
+
+// ── Pitch Processing State ────────────────────────────────────────────────────
+function setPitchProcessing(active) {
+    isPitchProcessing = active;
+    // Banner global no topo
+    if (pitchProcessingBanner) {
+        pitchProcessingBanner.classList.toggle('visible', active);
+    }
+    // Spinner inline no card de pitch
+    if (pitchProcessingInline) {
+        pitchProcessingInline.classList.toggle('visible', active);
+        pitchProcessingInline.setAttribute('aria-hidden', String(!active));
+    }
+    // Trava/destrava o botão play
+    if (playBtn) {
+        playBtn.disabled = active;
+        playBtn.classList.toggle('processing', active);
+        playBtn.setAttribute('aria-label', active ? 'Processing pitch…' : (isPlaying ? 'Pause' : 'Play'));
+    }
+    // Trava slider de pitch durante o processamento
+    const pitchSlider = document.getElementById('pitchSlider');
+    if (pitchSlider) pitchSlider.style.pointerEvents = active ? 'none' : '';
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getSpeedValue()   { return parseFloat(document.getElementById('speedSlider').value); }
@@ -162,7 +188,9 @@ async function loadAudioFile(file) {
         const arrayBuffer = await file.arrayBuffer();
         audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
         // Constrói buffer com pitch inicial (0 semitones = ratio 1 = cópia direta)
+        setPitchProcessing(true);
         await buildPitchedBuffer();
+        setPitchProcessing(false);
         document.querySelectorAll('.player-section').forEach(el => el.classList.add('active'));
         initializeAudioNodes();
         drawWaveform();
@@ -171,6 +199,7 @@ async function loadAudioFile(file) {
         syncProgressUI(0);
         console.log('✅ Audio loaded');
     } catch (err) {
+        setPitchProcessing(false);
         console.error('Error loading audio:', err);
         alert('Failed to load audio file. Please try another file.');
     }
@@ -240,6 +269,7 @@ function createReverbImpulse(duration, decay) {
 // ====================================
 function play() {
     if (!pitchedBuffer) return;
+    if (isPitchProcessing) return; // bloqueia play durante processamento
     if (isPlaying) { pause(); return; }
     if (audioContext.state === 'suspended') audioContext.resume();
 
@@ -497,15 +527,25 @@ document.getElementById('speedSlider').addEventListener('input', e => {
 let pitchDebounceTimer = null;
 document.getElementById('pitchSlider').addEventListener('input', e => {
     const v = parseFloat(e.target.value);
-    document.getElementById('pitchValue').textContent = v.toFixed(1) + ' semitones';
+    document.getElementById('pitchValue').textContent = v.toFixed(1) + ' st';
+    // Mostra o spinner inline imediatamente (feedback visual antes do debounce)
+    if (pitchProcessingInline) {
+        pitchProcessingInline.classList.add('visible');
+        pitchProcessingInline.setAttribute('aria-hidden', 'false');
+    }
     // Debounce: espera 300ms sem mover o slider para reconstruir
     clearTimeout(pitchDebounceTimer);
     pitchDebounceTimer = setTimeout(async () => {
-        if (!audioBuffer) return;
+        if (!audioBuffer) {
+            setPitchProcessing(false);
+            return;
+        }
         const wasPlaying = isPlaying;
         const savedTime  = getCurrentSourceTime();
         if (isPlaying) pauseWithoutReset();
+        setPitchProcessing(true);
         await buildPitchedBuffer();
+        setPitchProcessing(false);
         pauseTime = savedTime;
         syncProgressUI(savedTime);
         if (wasPlaying) play();
@@ -604,7 +644,7 @@ async function applyPreset(p) {
     document.getElementById('speedSlider').value   = p.speed;
     document.getElementById('speedValue').textContent  = p.speed.toFixed(2) + 'x';
     document.getElementById('pitchSlider').value   = p.pitch;
-    document.getElementById('pitchValue').textContent  = p.pitch.toFixed(1) + ' semitones';
+    document.getElementById('pitchValue').textContent  = p.pitch.toFixed(1) + ' st';
     document.getElementById('volumeSlider').value  = p.volume;
     document.getElementById('volumeValue').textContent = p.volume.toFixed(1) + '%';
     document.getElementById('bassSlider').value    = p.bass;
@@ -641,7 +681,9 @@ async function applyPreset(p) {
         const wasPlaying = isPlaying;
         const savedTime  = getCurrentSourceTime();
         if (isPlaying) pauseWithoutReset();
+        setPitchProcessing(true);
         await buildPitchedBuffer();
+        setPitchProcessing(false);
         currentPlaybackRate = getSpeedValue();
         pauseTime = savedTime;
         syncProgressUI(savedTime);
@@ -834,6 +876,7 @@ waveformCanvas.height = waveformCanvas.offsetHeight * 2;
 // ====================================
 document.addEventListener('keydown', e => {
     if (!pitchedBuffer) return;
+    if (isPitchProcessing) return; // bloqueia atalhos durante processamento
     const tag  = e.target.tagName.toLowerCase();
     const type = (e.target.type || '').toLowerCase();
     if (tag === 'textarea') return;
