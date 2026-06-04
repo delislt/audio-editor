@@ -1,16 +1,15 @@
 // ============================================================
-// SoundTouch pitch-shift helper
-// Uses soundtouch-audio-worklet from CDN (loaded in HTML)
-// Pitch and speed are fully independent.
-// Parameters update LIVE while playing — no restart needed.
+// Audio Editor — script.js
+// Pitch shifting via inline Phase Vocoder AudioWorklet.
+// Pitch and tempo are fully independent, update live.
 // ============================================================
 
 let audioContext;
 let audioBuffer;
 let sourceNode;
-let soundTouchNode = null;
-let stReady = false;
-let stRegistering = null; // Promise while registering (avoids double-register)
+let pitchNode   = null;  // AudioWorkletNode (PitchShiftProcessor)
+let stReady     = false;
+let stLoading   = null;  // Promise while loading
 let analyser;
 let preGainNode;
 let gainNode;
@@ -25,25 +24,24 @@ let reverbDryGain;
 let reverbWetGain;
 let delayNode;
 let delayGain;
-let isPlaying = false;
-let startTime = 0;
-let pauseTime = 0;
+let isPlaying        = false;
+let startTime        = 0;
+let pauseTime        = 0;
 let animationId;
 let progressRafId;
 let meterInterval;
 let eightDAudioInterval;
-let eightDEnabled = false;
-let limiterEnabled = true;
-let currentFileName = '';
-let clipCount = 0;
-let peakHold = 0;
-let peakHoldTime = 0;
-let currentSpeed = 1.0;
+let eightDEnabled    = false;
+let limiterEnabled   = true;
+let currentFileName  = '';
+let clipCount        = 0;
+let peakHold         = 0;
+let peakHoldTime     = 0;
+let currentSpeed     = 1.0;
 
 // DOM
 const uploadSection  = document.getElementById('uploadSection');
 const fileInput      = document.getElementById('fileInput');
-const playerSection  = document.getElementById('playerSection');
 const playBtn        = document.getElementById('playBtn');
 const stopBtn        = document.getElementById('stopBtn');
 const resetBtn       = document.getElementById('resetBtn');
@@ -56,25 +54,26 @@ const totalTimeEl    = document.getElementById('totalTime');
 const fileNameEl     = document.getElementById('fileName');
 const waveformCanvas = document.getElementById('waveform');
 const waveformCtx    = waveformCanvas.getContext('2d');
-const playIcon  = document.getElementById('playIcon');
-const pauseIcon = document.getElementById('pauseIcon');
+const playIcon       = document.getElementById('playIcon');
+const pauseIcon      = document.getElementById('pauseIcon');
 
 function showPlayIcon()  { playIcon.style.display = ''; pauseIcon.style.display = 'none'; }
 function showPauseIcon() { playIcon.style.display = 'none'; pauseIcon.style.display = ''; }
 
 function getSpeed()   { return parseFloat(document.getElementById('speedSlider').value); }
 function getPitchST() { return parseFloat(document.getElementById('pitchSlider').value); }
+function pitchSTtoRatio(st) { return Math.pow(2, st / 12); }
 
 function getAdjustedDuration() {
-    if (!audioBuffer) return 0;
-    return audioBuffer.duration / getSpeed();
+    return audioBuffer ? audioBuffer.duration / getSpeed() : 0;
 }
 
+// ── Progress ──────────────────────────────────────────────────────────────────
 function syncProgressUI(sourceTime) {
     if (!audioBuffer) return;
     if (sourceTime === undefined) sourceTime = getCurrentSourceTime();
     const ratio = Math.max(0, Math.min(1, sourceTime / audioBuffer.duration));
-    const pct = (ratio * 100).toFixed(4) + '%';
+    const pct   = (ratio * 100).toFixed(4) + '%';
     progressFill.style.width = pct;
     if (progressThumb) progressThumb.style.left = pct;
     const adj = getAdjustedDuration();
@@ -92,8 +91,8 @@ function getCurrentSourceTime() {
 }
 
 function pauseWithoutReset() {
-    if (sourceNode) { try { sourceNode.stop(); } catch(e){} sourceNode.disconnect(); }
-    if (soundTouchNode) { try { soundTouchNode.disconnect(); } catch(e){} soundTouchNode = null; }
+    if (sourceNode)  { try { sourceNode.stop(); }  catch(e){} sourceNode.disconnect(); }
+    if (pitchNode)   { try { pitchNode.disconnect(); } catch(e){} pitchNode = null; }
     isPlaying = false;
     showPlayIcon();
     cancelAnimationFrame(progressRafId);
@@ -102,80 +101,66 @@ function pauseWithoutReset() {
 }
 
 // ====================================
-// SOUNDTOUCH WORKLET
+// WORKLET — load local pitch-worklet.js
 // ====================================
-async function ensureSoundTouch() {
-    if (stReady) return true;
-    if (stRegistering) return stRegistering; // don't double-register
-    stRegistering = (async () => {
+async function ensureWorklet() {
+    if (stReady)   return true;
+    if (stLoading) return stLoading;
+    stLoading = (async () => {
         try {
-            await audioContext.audioWorklet.addModule(
-                'https://cdn.jsdelivr.net/npm/soundtouch-audio-worklet@1.1.3/dist/soundtouch-worklet.js'
-            );
+            await audioContext.audioWorklet.addModule('./pitch-worklet.js');
             stReady = true;
-            console.log('✅ SoundTouch worklet registered');
+            console.log('✅ Pitch worklet loaded');
             return true;
         } catch (err) {
-            console.warn('⚠️ SoundTouch fallback (native playbackRate):', err);
+            console.warn('⚠️ Pitch worklet failed — using native fallback:', err);
             return false;
         } finally {
-            stRegistering = null;
+            stLoading = null;
         }
     })();
-    return stRegistering;
+    return stLoading;
 }
 
-function createSoundTouchNode(speed, pitchSemitones) {
+function createPitchNode(pitchRatio, tempo) {
     try {
-        const node = new AudioWorkletNode(audioContext, 'soundtouch-worklet', {
-            processorOptions: { bufferSize: 4096 }
+        const node = new AudioWorkletNode(audioContext, 'pitch-shift-processor', {
+            numberOfInputs: 1, numberOfOutputs: 1,
+            outputChannelCount: [1]
         });
-        node.parameters.get('pitch').setValueAtTime(Math.pow(2, pitchSemitones / 12), 0);
-        node.parameters.get('tempo').setValueAtTime(speed, 0);
+        node.parameters.get('pitch').setValueAtTime(pitchRatio, 0);
+        node.parameters.get('tempo').setValueAtTime(tempo, 0);
         return node;
     } catch(e) {
-        console.warn('SoundTouch node creation failed:', e);
+        console.warn('createPitchNode failed:', e);
         return null;
     }
 }
 
-// ── Live param update — NO restart, just poke the AudioParam ──────────────────
-// Called by speed/pitch sliders while playing.
+// ── Live update: poke AudioParams directly, zero interruption ─────────────────
 function updateLiveParams(speed, pitchST) {
     currentSpeed = speed;
+    const ratio = pitchSTtoRatio(pitchST);
 
-    if (soundTouchNode) {
-        // Update in-flight SoundTouch parameters — no gap in audio
-        try {
-            soundTouchNode.parameters.get('tempo').setValueAtTime(speed, audioContext.currentTime);
-            soundTouchNode.parameters.get('pitch').setValueAtTime(Math.pow(2, pitchST / 12), audioContext.currentTime);
-        } catch(e) {
-            // Node may have errored; fall through to sourceNode fallback
-        }
-        // Re-anchor startTime so progress tracking stays accurate
+    if (pitchNode) {
+        // Update in-flight worklet params
+        pitchNode.parameters.get('pitch').setValueAtTime(ratio, audioContext.currentTime);
+        pitchNode.parameters.get('tempo').setValueAtTime(speed, audioContext.currentTime);
+        // sourceNode runs at 1x — speed is handled by the worklet
+        // Re-anchor startTime for progress bar accuracy
         const srcNow = getCurrentSourceTime();
         startTime = audioContext.currentTime - srcNow / speed;
         return;
     }
 
+    // Fallback: native playbackRate (pitch+speed linked, but no gap)
     if (sourceNode) {
-        // No SoundTouch node — update native playbackRate (pitch+speed linked)
-        const rate = speed * Math.pow(2, pitchST / 12);
+        const rate = speed * ratio;
         try { sourceNode.playbackRate.setValueAtTime(rate, audioContext.currentTime); } catch(e){}
-        currentSpeed = rate; // for progress tracking
+        currentSpeed = rate;
         const srcNow = getCurrentSourceTime();
         startTime = audioContext.currentTime - srcNow / currentSpeed;
     }
-}
-
-// Called when we need a full restart (e.g. seek, preset change, or SoundTouch
-// was not active yet and pitch is now non-zero)
-async function restartWithNewParams() {
-    if (!audioBuffer || !isPlaying) return;
-    const t = getCurrentSourceTime();
-    pauseWithoutReset();
-    pauseTime = t;
-    await play();
 }
 
 // ====================================
@@ -201,7 +186,7 @@ async function loadAudioFile(file) {
     try {
         if (audioContext) { try { await audioContext.close(); } catch(e){} }
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        stReady = false; stRegistering = null;
+        stReady = false; stLoading = null;
 
         const arrayBuffer = await file.arrayBuffer();
         audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
@@ -214,8 +199,8 @@ async function loadAudioFile(file) {
         showPlayIcon();
         syncProgressUI(0);
 
-        ensureSoundTouch(); // pre-register in background
-        console.log('✅ Audio loaded');
+        ensureWorklet(); // pre-load in background
+        console.log('✅ Audio loaded:', file.name);
     } catch(err) {
         console.error('Error loading audio:', err);
         alert('Failed to load audio file.');
@@ -254,9 +239,6 @@ function initializeAudioNodes() {
     analyser = audioContext.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.8;
 }
 
-// ====================================
-// REVERB
-// ====================================
 function createReverbImpulse(duration, decay) {
     const rate = audioContext.sampleRate;
     const length = Math.max(1, Math.round(rate * duration));
@@ -280,31 +262,32 @@ async function play() {
 
     const speed   = getSpeed();
     const pitchST = getPitchST();
+    const ratio   = pitchSTtoRatio(pitchST);
     currentSpeed  = speed;
 
     sourceNode = audioContext.createBufferSource();
     sourceNode.buffer = audioBuffer;
-
     const offset = Math.min(pauseTime, audioBuffer.duration - 0.001);
 
-    const stOk = await ensureSoundTouch();
+    const wok = await ensureWorklet();
 
-    if (stOk) {
-        // Always use SoundTouch when available — handles both pitch=0 and pitch≠0
-        soundTouchNode = createSoundTouchNode(speed, pitchST);
+    if (wok) {
+        pitchNode = createPitchNode(ratio, speed);
     }
 
-    if (soundTouchNode) {
+    if (pitchNode) {
+        // sourceNode plays at native rate; worklet handles pitch + tempo
         sourceNode.playbackRate.value = 1.0;
-        sourceNode.connect(soundTouchNode);
-        connectAudioGraph(soundTouchNode);
+        sourceNode.connect(pitchNode);
+        connectAudioGraph(pitchNode);
     } else {
-        sourceNode.playbackRate.value = speed * Math.pow(2, pitchST / 12);
+        // Fallback: native (speed+pitch linked)
+        sourceNode.playbackRate.value = speed * ratio;
         connectAudioGraph(sourceNode);
     }
 
     sourceNode.start(0, offset);
-    startTime = audioContext.currentTime - (offset / currentSpeed);
+    startTime = audioContext.currentTime - offset / currentSpeed;
     isPlaying = true;
     showPauseIcon();
 
@@ -323,7 +306,7 @@ function pause() {
 
 function stop() {
     if (sourceNode) { try { sourceNode.stop(); } catch(e){} sourceNode.disconnect(); }
-    if (soundTouchNode) { try { soundTouchNode.disconnect(); } catch(e){} soundTouchNode = null; }
+    if (pitchNode)  { try { pitchNode.disconnect(); }  catch(e){} pitchNode = null; }
     isPlaying = false; pauseTime = 0; startTime = 0;
     showPlayIcon(); syncProgressUI(0);
     cancelAnimationFrame(progressRafId); cancelAnimationFrame(animationId);
@@ -492,13 +475,12 @@ document.addEventListener('mouseup', () => {
     if (!wasPausedBeforeDrag) play();
 });
 document.addEventListener('touchend', () => {
-    if (!isDragging) return;
-    isDragging = false;
+    if (!isDragging) return; isDragging = false;
     if (!wasPausedBeforeDrag) play();
 });
 
 // ====================================
-// CONTROL SLIDERS
+// SLIDERS
 // ====================================
 document.getElementById('preGainSlider').addEventListener('input', (e) => {
     const v = parseFloat(e.target.value);
@@ -511,34 +493,24 @@ document.getElementById('outputGainSlider').addEventListener('input', (e) => {
     if (outputGainNode) outputGainNode.gain.value = dbToGain(v); clipCount = 0;
 });
 const limiterToggle = document.getElementById('limiterToggle');
-limiterToggle.addEventListener('click', () => {
-    limiterEnabled = !limiterEnabled; limiterToggle.classList.toggle('active');
-});
+limiterToggle.addEventListener('click', () => { limiterEnabled = !limiterEnabled; limiterToggle.classList.toggle('active'); });
 document.getElementById('limiterThresholdSlider').addEventListener('input', (e) => {
     const v = parseFloat(e.target.value);
     document.getElementById('limiterThresholdValue').textContent = v.toFixed(1) + ' dB';
     if (compressorNode) compressorNode.threshold.value = v;
 });
 
-// ── Speed: live update via AudioParam, zero gap ───────────────────────────────
 document.getElementById('speedSlider').addEventListener('input', (e) => {
     const v = parseFloat(e.target.value);
     document.getElementById('speedValue').textContent = v.toFixed(2) + 'x';
-    if (isPlaying) {
-        updateLiveParams(v, getPitchST());
-    } else {
-        currentSpeed = v;
-        syncProgressUI();
-    }
+    if (isPlaying) updateLiveParams(v, getPitchST());
+    else { currentSpeed = v; syncProgressUI(); }
 });
 
-// ── Pitch: live update via AudioParam, zero gap ───────────────────────────────
 document.getElementById('pitchSlider').addEventListener('input', (e) => {
     const v = parseFloat(e.target.value);
     document.getElementById('pitchValue').textContent = v.toFixed(1) + ' semitones';
-    if (isPlaying) {
-        updateLiveParams(getSpeed(), v);
-    }
+    if (isPlaying) updateLiveParams(getSpeed(), v);
 });
 
 document.getElementById('volumeSlider').addEventListener('input', (e) => {
@@ -596,10 +568,7 @@ function start8DAudio() {
     if (!panNode) return;
     const speed = parseFloat(document.getElementById('eightDSpeed').value);
     let angle = 0;
-    eightDAudioInterval = setInterval(() => {
-        angle += 0.05 * speed;
-        if (panNode) panNode.pan.value = Math.sin(angle);
-    }, 50);
+    eightDAudioInterval = setInterval(() => { angle += 0.05*speed; if(panNode) panNode.pan.value = Math.sin(angle); }, 50);
 }
 function stop8DAudio() {
     if (eightDAudioInterval) { clearInterval(eightDAudioInterval); eightDAudioInterval = null; }
@@ -646,26 +615,22 @@ function applyPreset(p) {
     if (preGainNode)    preGainNode.gain.value    = dbToGain(p.preGain);
     if (outputGainNode) outputGainNode.gain.value = dbToGain(p.outputGain);
     const wet = p.reverb/100;
-    if (reverbDryGain)  reverbDryGain.gain.value  = 1 - wet;
-    if (reverbWetGain)  reverbWetGain.gain.value  = wet * 0.6;
-    if (convolverNode)  createReverbImpulse(2, Math.max(0.001, p.reverb/20));
+    if (reverbDryGain) reverbDryGain.gain.value = 1 - wet;
+    if (reverbWetGain) reverbWetGain.gain.value = wet * 0.6;
+    if (convolverNode) createReverbImpulse(2, Math.max(0.001, p.reverb/20));
 
     if (p.eightD && !eightDEnabled)      eightDToggle.click();
     else if (!p.eightD && eightDEnabled) eightDToggle.click();
 
     currentSpeed = p.speed;
     if (audioBuffer) {
-        if (isPlaying) {
-            // Use live param update for presets too — no gap
-            updateLiveParams(p.speed, p.pitch);
-        } else {
-            syncProgressUI();
-        }
+        if (isPlaying) updateLiveParams(p.speed, p.pitch);
+        else           syncProgressUI();
     }
 }
 
 // ====================================
-// BUTTON CONTROLS
+// BUTTONS
 // ====================================
 playBtn.addEventListener('click', play);
 stopBtn.addEventListener('click', stop);
@@ -682,7 +647,7 @@ downloadBtn.addEventListener('click', async () => {
 
         const pitchShift = getPitchST();
         const speed      = getSpeed();
-        const finalRate  = speed * Math.pow(2, pitchShift / 12);
+        const finalRate  = speed * pitchSTtoRatio(pitchShift);
         const newLen     = Math.ceil((audioBuffer.duration / finalRate) * audioContext.sampleRate);
 
         const offCtx = new OfflineAudioContext(audioBuffer.numberOfChannels, newLen, audioContext.sampleRate);
@@ -704,7 +669,7 @@ downloadBtn.addEventListener('click', async () => {
         offDry.gain.value = 1-revV; offWet.gain.value = revV*0.6;
         const rLen = offCtx.sampleRate*2, rBuf = offCtx.createBuffer(2,rLen,offCtx.sampleRate);
         const dv = Math.max(0.001, revV*20);
-        for(let ch=0;ch<2;ch++){const d=rBuf.getChannelData(ch); for(let i=0;i<rLen;i++) d[i]=(Math.random()*2-1)*Math.pow((rLen-i)/rLen,dv);} offConv.buffer=rBuf;
+        for(let ch=0;ch<2;ch++){const d=rBuf.getChannelData(ch);for(let i=0;i<rLen;i++) d[i]=(Math.random()*2-1)*Math.pow((rLen-i)/rLen,dv);} offConv.buffer=rBuf;
         const offComp = offCtx.createDynamicsCompressor(); offComp.threshold.value=-3; offComp.knee.value=6; offComp.ratio.value=12; offComp.attack.value=0.003; offComp.release.value=0.25;
         const offOut  = offCtx.createGain(); offOut.gain.value = dbToGain(parseFloat(document.getElementById('outputGainSlider').value));
 
@@ -724,29 +689,29 @@ downloadBtn.addEventListener('click', async () => {
         if(ng<1.5){for(let ch=0;ch<rendered.numberOfChannels;ch++){const d=rendered.getChannelData(ch);for(let i=0;i<d.length;i++) d[i]=Math.max(-1,Math.min(1,d[i]*ng));}}
 
         const wav  = audioBufferToWav(rendered);
-        const blob = new Blob([wav], {type:'audio/wav'});
+        const blob = new Blob([wav],{type:'audio/wav'});
         const url  = URL.createObjectURL(blob);
-        const a    = document.createElement('a'); a.href = url;
-        const fx = [];
-        if(speed!==1.0)        fx.push(speed+'x');
-        if(pitchShift!==0)     fx.push((pitchShift>0?'+':'')+pitchShift+'st');
+        const a    = document.createElement('a'); a.href=url;
+        const fx=[];
+        if(speed!==1.0)    fx.push(speed+'x');
+        if(pitchShift!==0) fx.push((pitchShift>0?'+':'')+pitchShift+'st');
         if(parseFloat(document.getElementById('bassSlider').value)>0)   fx.push('bass');
         if(parseFloat(document.getElementById('reverbSlider').value)>0) fx.push('reverb');
         if(parseFloat(document.getElementById('echoSlider').value)>0)   fx.push('echo');
-        a.download = 'edited_'+currentFileName.replace(/\.[^/.]+$/,'')+(fx.length?'_'+fx.join('_'):'')+'.wav';
+        a.download='edited_'+currentFileName.replace(/\.[^/.]+$/,'')+(fx.length?'_'+fx.join('_'):'')+'.wav';
         a.click(); URL.revokeObjectURL(url);
     } catch(err) {
-        console.error('Export error:', err); alert('Failed to export: '+err.message);
+        console.error('Export error:',err); alert('Failed to export: '+err.message);
     } finally {
-        downloadBtn.querySelector('span').textContent = 'Export'; downloadBtn.disabled = false;
+        downloadBtn.querySelector('span').textContent='Export'; downloadBtn.disabled=false;
     }
 });
 
 // ====================================
-// AUDIO BUFFER TO WAV
+// WAV ENCODER
 // ====================================
 function audioBufferToWav(buf) {
-    const nCh=buf.numberOfChannels, len=buf.length*nCh*2;
+    const nCh=buf.numberOfChannels,len=buf.length*nCh*2;
     const ab=new ArrayBuffer(44+len); const v=new DataView(ab);
     writeStr(v,0,'RIFF'); v.setUint32(4,36+len,true);
     writeStr(v,8,'WAVE'); writeStr(v,12,'fmt ');
@@ -765,69 +730,66 @@ function audioBufferToWav(buf) {
 function writeStr(view,off,str){for(let i=0;i<str.length;i++) view.setUint8(off+i,str.charCodeAt(i));}
 
 // ====================================
-// UTILITY
+// UTILITIES
 // ====================================
 function formatTime(s){if(!isFinite(s)||s<0)return'0:00';const m=Math.floor(s/60),sc=Math.floor(s%60);return m+':'+(sc<10?'0':'')+sc;}
 function dbToGain(db){return Math.pow(10,db/20);}
 function gainToDb(g){return 20*Math.log10(Math.max(g,0.00001));}
 
-// ====================================
-// RESPONSIVE CANVAS
-// ====================================
-window.addEventListener('resize', () => { if(audioBuffer) drawWaveform(); });
+window.addEventListener('resize',()=>{if(audioBuffer)drawWaveform();});
 waveformCanvas.width  = waveformCanvas.offsetWidth  * 2;
 waveformCanvas.height = waveformCanvas.offsetHeight * 2;
 
 // ====================================
 // KEYBOARD SHORTCUTS
 // ====================================
-document.addEventListener('keydown', (e) => {
-    if (!audioBuffer) return;
-    if (['input','textarea'].includes(e.target.tagName.toLowerCase())) return;
-    switch(e.key.toLowerCase()) {
-        case ' ': case 'k': e.preventDefault(); play(); break;
-        case 'arrowleft':  e.preventDefault(); seekRelative(-5);  break;
-        case 'arrowright': e.preventDefault(); seekRelative(5);   break;
-        case 'j':          e.preventDefault(); seekRelative(-10); break;
-        case 'l':          e.preventDefault(); seekRelative(10);  break;
-        case 'home':       e.preventDefault(); seekTo(0); break;
-        case 'end':        e.preventDefault(); seekTo(audioBuffer.duration); break;
-        case 'arrowup':    e.preventDefault(); changeVolume(5);  break;
-        case 'arrowdown':  e.preventDefault(); changeVolume(-5); break;
-        case 'm':          e.preventDefault(); toggleMute(); break;
+document.addEventListener('keydown',(e)=>{
+    if(!audioBuffer)return;
+    if(['input','textarea'].includes(e.target.tagName.toLowerCase()))return;
+    switch(e.key.toLowerCase()){
+        case ' ':case'k': e.preventDefault();play();break;
+        case 'arrowleft':  e.preventDefault();seekRelative(-5);break;
+        case 'arrowright': e.preventDefault();seekRelative(5);break;
+        case 'j':          e.preventDefault();seekRelative(-10);break;
+        case 'l':          e.preventDefault();seekRelative(10);break;
+        case 'home':       e.preventDefault();seekTo(0);break;
+        case 'end':        e.preventDefault();seekTo(audioBuffer.duration);break;
+        case 'arrowup':    e.preventDefault();changeVolume(5);break;
+        case 'arrowdown':  e.preventDefault();changeVolume(-5);break;
+        case 'm':          e.preventDefault();toggleMute();break;
     }
 });
 
-function seekRelative(secs) {
-    if (!audioBuffer) return;
-    const was = isPlaying; if(was) pauseWithoutReset();
-    pauseTime = Math.max(0, Math.min(audioBuffer.duration, getCurrentSourceTime()+secs));
-    syncProgressUI(pauseTime); if(was) play();
+function seekRelative(secs){
+    if(!audioBuffer)return;
+    const was=isPlaying; if(was)pauseWithoutReset();
+    pauseTime=Math.max(0,Math.min(audioBuffer.duration,getCurrentSourceTime()+secs));
+    syncProgressUI(pauseTime); if(was)play();
 }
-function seekTo(t) {
-    if (!audioBuffer) return;
-    const was = isPlaying; if(was) pauseWithoutReset();
-    pauseTime = Math.max(0, Math.min(audioBuffer.duration, t));
-    syncProgressUI(pauseTime); if(was) play();
+function seekTo(t){
+    if(!audioBuffer)return;
+    const was=isPlaying; if(was)pauseWithoutReset();
+    pauseTime=Math.max(0,Math.min(audioBuffer.duration,t));
+    syncProgressUI(pauseTime); if(was)play();
 }
 
-let previousVolume = 100, isMuted = false;
-function changeVolume(delta) {
-    const sl = document.getElementById('volumeSlider');
-    const nv = Math.max(0, Math.min(150, parseFloat(sl.value)+delta));
-    sl.value = nv; document.getElementById('volumeValue').textContent = nv.toFixed(1)+'%';
-    if(gainNode) gainNode.gain.value = nv/100;
+let previousVolume=100,isMuted=false;
+function changeVolume(delta){
+    const sl=document.getElementById('volumeSlider');
+    const nv=Math.max(0,Math.min(150,parseFloat(sl.value)+delta));
+    sl.value=nv; document.getElementById('volumeValue').textContent=nv.toFixed(1)+'%';
+    if(gainNode)gainNode.gain.value=nv/100;
 }
-function toggleMute() {
-    const sl = document.getElementById('volumeSlider');
-    if(isMuted) {
-        sl.value = previousVolume; document.getElementById('volumeValue').textContent = previousVolume.toFixed(1)+'%';
-        if(gainNode) gainNode.gain.value = previousVolume/100; isMuted=false;
-    } else {
-        previousVolume = parseFloat(sl.value); sl.value=0;
-        document.getElementById('volumeValue').textContent = '0% (Muted)';
-        if(gainNode) gainNode.gain.value = 0; isMuted=true;
+function toggleMute(){
+    const sl=document.getElementById('volumeSlider');
+    if(isMuted){
+        sl.value=previousVolume; document.getElementById('volumeValue').textContent=previousVolume.toFixed(1)+'%';
+        if(gainNode)gainNode.gain.value=previousVolume/100; isMuted=false;
+    }else{
+        previousVolume=parseFloat(sl.value); sl.value=0;
+        document.getElementById('volumeValue').textContent='0% (Muted)';
+        if(gainNode)gainNode.gain.value=0; isMuted=true;
     }
 }
 
-console.log('🎵 Audio Editor — live pitch/speed, no interruption ✅');
+console.log('🎵 Audio Editor — Phase Vocoder pitch shift ✅');
