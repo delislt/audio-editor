@@ -16,6 +16,7 @@ let reverbDryGain;
 let reverbWetGain;
 let delayNode;
 let delayGain;
+let mergerNode; // FIX: stored so it can be disconnected
 let isPlaying = false;
 let startTime = 0;
 let pauseTime = 0;
@@ -104,12 +105,35 @@ function getCurrentSourceTime() {
     return Math.min(pauseTime, audioBuffer.duration);
 }
 
+// ====================================
+// AUDIO GRAPH — DISCONNECT (FIX)
+// ====================================
+// FIX: desconecta todos os nós persistentes do grafo antes de reconectar.
+// Sem isso, cada chamada a connectAudioGraph() empilhava novas conexões
+// sobre as existentes, criando múltiplas rotas paralelas que amplificavam
+// progressivamente o volume e acumulavam nós na memória.
+function disconnectAudioGraph() {
+    const nodes = [
+        preGainNode, bassFilter, midFilter, trebleFilter,
+        panNode, gainNode, delayNode, delayGain,
+        reverbDryGain, reverbWetGain, convolverNode,
+        mergerNode, compressorNode, outputGainNode, analyser,
+    ];
+    nodes.forEach(node => {
+        if (node) {
+            try { node.disconnect(); } catch (e) { /* já desconectado */ }
+        }
+    });
+    mergerNode = null;
+}
+
 // ── Pause without resetting position ─────────────────────────────────────────
 function pauseWithoutReset() {
     if (sourceNode) {
         try { sourceNode.stop(); } catch(e){}
-        sourceNode.disconnect();
+        try { sourceNode.disconnect(); } catch(e){}
     }
+    disconnectAudioGraph(); // FIX: libera grafo ao pausar
     isPlaying = false;
     showPlayIcon();
     cancelAnimationFrame(progressRafId);
@@ -239,6 +263,8 @@ function initializeAudioNodes() {
     analyser = audioContext.createAnalyser();
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.8;
+
+    mergerNode = null; // será criado em connectAudioGraph()
 }
 
 // ====================================
@@ -301,6 +327,7 @@ function pause() {
     if (!isPlaying) return;
     pauseTime = getCurrentSourceTime();
     try { sourceNode.stop(); } catch(e){}
+    disconnectAudioGraph(); // FIX: libera grafo ao pausar normalmente
     isPlaying = false;
     showPlayIcon();
     cancelAnimationFrame(progressRafId);
@@ -311,8 +338,9 @@ function pause() {
 function stop() {
     if (sourceNode) {
         try { sourceNode.stop(); } catch(e){}
-        sourceNode.disconnect();
+        try { sourceNode.disconnect(); } catch(e){}
     }
+    disconnectAudioGraph(); // FIX: libera grafo ao parar
     isPlaying = false;
     pauseTime = 0;
     startTime = 0;
@@ -328,6 +356,9 @@ function stop() {
 // ====================================
 
 function connectAudioGraph() {
+    // FIX: desconecta tudo antes de reconectar para evitar conexões duplicadas
+    disconnectAudioGraph();
+
     sourceNode.connect(preGainNode);
     preGainNode.connect(bassFilter);
     bassFilter.connect(midFilter);
@@ -349,18 +380,19 @@ function connectAudioGraph() {
     reverbDryGain.gain.value = 1 - reverbValue;
     reverbWetGain.gain.value = reverbValue * 0.6;
 
-    const merger = audioContext.createGain();
+    // FIX: armazena o merger em mergerNode para poder desconectá-lo depois
+    mergerNode = audioContext.createGain();
     gainNode.connect(reverbDryGain);
-    reverbDryGain.connect(merger);
+    reverbDryGain.connect(mergerNode);
     gainNode.connect(convolverNode);
     convolverNode.connect(reverbWetGain);
-    reverbWetGain.connect(merger);
+    reverbWetGain.connect(mergerNode);
 
     if (limiterEnabled) {
-        merger.connect(compressorNode);
+        mergerNode.connect(compressorNode);
         compressorNode.connect(outputGainNode);
     } else {
-        merger.connect(outputGainNode);
+        mergerNode.connect(outputGainNode);
     }
 
     outputGainNode.connect(analyser);
@@ -1096,4 +1128,4 @@ function toggleMute() {
     }
 }
 
-console.log('🎵 Audio Editor — seek bug fixed ✅');
+console.log('🎵 Audio Editor — memory leak fix applied ✅');
