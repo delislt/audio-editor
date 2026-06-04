@@ -176,15 +176,11 @@ function teardownToneGraph() {
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
-uploadSection.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', e => { const f = e.target.files[0]; if (f) loadAudioFile(f); });
-uploadSection.addEventListener('dragover', e => { e.preventDefault(); uploadSection.classList.add('drag-over'); });
-uploadSection.addEventListener('dragleave', () => uploadSection.classList.remove('drag-over'));
-uploadSection.addEventListener('drop', e => {
-    e.preventDefault(); uploadSection.classList.remove('drag-over');
-    const f = e.dataTransfer.files[0];
-    if (f && f.type.startsWith('audio/')) loadAudioFile(f);
-    else alert('Please upload a valid audio file (MP3, WAV, OGG)');
+// Os event listeners de clique/drag da uploadSection estão no index.html
+// para evitar duplicação. Aqui apenas o listener de mudança do input.
+fileInput.addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (f) loadAudioFile(f);
 });
 
 async function loadAudioFile(file) {
