@@ -24,6 +24,19 @@
   <link rel="manifest" href="site.webmanifest">
 
   <link rel="stylesheet" href="styles.css">
+
+  <!-- Garante que o input de arquivo fique oculto e não interfira -->
+  <style>
+    #fileInput {
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      opacity: 0 !important;
+      overflow: hidden !important;
+      pointer-events: none !important;
+      z-index: -1 !important;
+    }
+  </style>
 </head>
 <body>
 
@@ -90,15 +103,17 @@
   </header>
 
   <!-- Upload Section -->
+  <!-- O input fica fora da uploadSection para evitar conflito de eventos -->
+  <input type="file" id="fileInput" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/ogg,audio/x-m4a,audio/m4a,audio/aac,audio/flac,audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac" aria-hidden="true" tabindex="-1">
+
   <div class="upload-section glass-card" id="uploadSection">
-    <input type="file" id="fileInput" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/ogg,audio/x-m4a,audio/m4a,audio/aac,audio/flac,audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac">
     <div class="upload-icon-wrap">
       <i data-lucide="music-4" class="upload-icon-svg"></i>
     </div>
     <h2>Drop your audio file here</h2>
     <p class="upload-hint">or click to browse</p>
     <p class="upload-formats">MP3 &middot; WAV &middot; OGG &middot; M4A &middot; AAC &middot; FLAC</p>
-    <button class="upload-btn glass-btn" id="chooseFileBtn" onclick="event.stopPropagation(); fileInput.value=''; fileInput.click()">
+    <button class="upload-btn glass-btn" id="chooseFileBtn" type="button">
       <i data-lucide="upload"></i> Choose File
     </button>
   </div>
@@ -296,6 +311,47 @@
 <script>
   document.addEventListener('DOMContentLoaded', () => {
     if (window.lucide) lucide.createIcons();
+
+    // Upload: botão "Choose File" e clique na área — ambos abrem o input corretamente
+    const fileInput    = document.getElementById('fileInput');
+    const uploadSection = document.getElementById('uploadSection');
+    const chooseFileBtn = document.getElementById('chooseFileBtn');
+
+    function openFilePicker() {
+      fileInput.value = '';   // reset para permitir selecionar o mesmo arquivo
+      fileInput.click();
+    }
+
+    // Botão "Choose File"
+    chooseFileBtn.addEventListener('click', function(e) {
+      e.stopPropagation();  // não propaga para uploadSection
+      openFilePicker();
+    });
+
+    // Clique na área de upload (exceto no botão, que já tem handler próprio)
+    uploadSection.addEventListener('click', function(e) {
+      if (e.target === chooseFileBtn || chooseFileBtn.contains(e.target)) return;
+      openFilePicker();
+    });
+
+    // Drag & drop
+    uploadSection.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      uploadSection.classList.add('drag-over');
+    });
+    uploadSection.addEventListener('dragleave', function() {
+      uploadSection.classList.remove('drag-over');
+    });
+    uploadSection.addEventListener('drop', function(e) {
+      e.preventDefault();
+      uploadSection.classList.remove('drag-over');
+      const f = e.dataTransfer.files[0];
+      if (f && (f.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(f.name))) {
+        if (typeof loadAudioFile === 'function') loadAudioFile(f);
+      } else {
+        alert('Please upload a valid audio file (MP3, WAV, OGG, M4A, AAC, FLAC)');
+      }
+    });
   });
 </script>
 
