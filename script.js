@@ -19,6 +19,7 @@ let analyserNode;
 let isPlaying    = false;
 let pauseOffset  = 0;
 let playStarted  = 0;
+let playbackRateAtStart = 1;
 let eightDEnabled  = false;
 let eightDAudioInterval = null;
 let limiterEnabled = true;
@@ -78,8 +79,25 @@ function getAdjustedDuration() { return getDuration() / getSpeedValue(); }
 
 function getCurrentOffset() {
     if (!isPlaying) return pauseOffset;
-    const elapsed = (Tone.now() - playStarted) * getSpeedValue();
+    const elapsed = Math.max(0, Tone.now() - playStarted) * playbackRateAtStart;
     return Math.min(pauseOffset + elapsed, getDuration());
+}
+
+function setPlaybackSpeed(speed) {
+    // O evento do slider já contém a velocidade nova. Preserve primeiro a
+    // posição calculada com a velocidade que estava ativa neste trecho.
+    const currentOffset = getCurrentOffset();
+    pauseOffset = currentOffset;
+
+    const slider = document.getElementById('speedSlider');
+    slider.value = speed;
+    document.getElementById('speedValue').textContent = speed.toFixed(2) + 'x';
+
+    if (tonePlayer) tonePlayer.playbackRate = speed;
+    playbackRateAtStart = speed;
+    if (isPlaying) playStarted = Tone.now();
+
+    syncProgressUI(currentOffset);
 }
 
 // ── Tone.js Graph
@@ -151,7 +169,7 @@ async function buildToneGraph() {
 }
 
 function teardownToneGraph() {
-    try { if (tonePlayer)     { tonePlayer.stop(); tonePlayer.dispose(); }     } catch(e){}
+    try { if (tonePlayer)     { tonePlayer.onstop = () => {}; tonePlayer.stop(); tonePlayer.dispose(); } } catch(e){}
     try { if (tonePitchShift) { tonePitchShift.dispose(); }                    } catch(e){}
     try { if (toneBass)       { toneBass.dispose(); }                          } catch(e){}
     try { if (toneTreble)     { toneTreble.dispose(); }                        } catch(e){}
@@ -212,7 +230,7 @@ async function loadAudioFile(file) {
         chooseFileBtn.disabled = true;
         chooseFileBtn.textContent = 'Carregando…';
         uploadSection.setAttribute('aria-busy', 'true');
-        isPlaying = false; pauseOffset = 0;
+        isPlaying = false; pauseOffset = 0; playbackRateAtStart = getSpeedValue();
         teardownToneGraph();
         stopLevelMeter();
         cancelAnimationFrame(progressRafId);
@@ -263,17 +281,18 @@ async function play() {
 
     const speed = getSpeedValue();
     tonePlayer.playbackRate = speed;
+    playbackRateAtStart = speed;
     if (tonePitchShift) tonePitchShift.pitch = getPitchSemitones();
 
     const maxOffset = Math.max(0, getDuration() - 0.01);
     const offset = Math.max(0, Math.min(pauseOffset, maxOffset));
     const startAt = Tone.now();
+    pauseOffset = offset;
+    tonePlayer.onstop = () => {};
     tonePlayer.start(startAt, offset);
     playStarted = startAt;
     isPlaying   = true;
     showPauseIcon();
-
-    tonePlayer.onstop = () => { if (isPlaying) _onEnded(); };
 
     visualize();
     scheduleProgressUpdate();
@@ -326,9 +345,13 @@ function syncProgressUI(overrideOffset) {
 function scheduleProgressUpdate() {
     cancelAnimationFrame(progressRafId);
     if (!isPlaying || isDragging) return;
-    syncProgressUI();
-    if (getCurrentOffset() < getDuration())
-        progressRafId = requestAnimationFrame(scheduleProgressUpdate);
+    const offset = getCurrentOffset();
+    syncProgressUI(offset);
+    if (offset >= getDuration()) {
+        _onEnded();
+        return;
+    }
+    progressRafId = requestAnimationFrame(scheduleProgressUpdate);
 }
 
 // ── Seek
@@ -365,17 +388,7 @@ function attachListeners() {
     // Sliders
     document.getElementById('speedSlider').addEventListener('input', e => {
         const v = parseFloat(e.target.value);
-        document.getElementById('speedValue').textContent = v.toFixed(2) + 'x';
-        if (tonePlayer) {
-            if (isPlaying) {
-                pauseOffset = getCurrentOffset();
-                tonePlayer.playbackRate = v;
-                playStarted = Tone.now();
-            } else {
-                tonePlayer.playbackRate = v;
-            }
-        }
-        syncProgressUI();
+        setPlaybackSpeed(v);
     });
 
     document.getElementById('pitchSlider').addEventListener('input', e => {
@@ -574,8 +587,7 @@ const presets = {
 };
 
 function applyPreset(p) {
-    document.getElementById('speedSlider').value  = p.speed;
-    document.getElementById('speedValue').textContent = p.speed.toFixed(2) + 'x';
+    setPlaybackSpeed(p.speed);
     document.getElementById('pitchSlider').value  = p.pitch;
     document.getElementById('pitchValue').textContent = p.pitch.toFixed(1) + ' st';
     document.getElementById('volumeSlider').value = p.volume;
@@ -598,7 +610,6 @@ function applyPreset(p) {
     if (toneDelay)     { toneDelay.wet.value = p.echo/100; toneDelay.feedback.value = Math.min(0.55, p.echo/100*0.5); }
     if (toneReverb)    toneReverb.wet.value        = p.reverb / 100;
     if (tonePitchShift) tonePitchShift.pitch       = p.pitch;
-    if (tonePlayer)    tonePlayer.playbackRate     = p.speed;
 
     if (p.eightD && !eightDEnabled)      eightDToggle.click();
     else if (!p.eightD && eightDEnabled) eightDToggle.click();
