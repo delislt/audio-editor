@@ -5,7 +5,6 @@
 // ── Estado global
 let audioContext;
 let audioBuffer;
-let audioBlobUrl = null;   // URL de objeto para o Tone.Player carregar
 let tonePlayer;
 let tonePitchShift;
 let toneGain;
@@ -16,7 +15,6 @@ let toneReverb;
 let toneDelay;
 let toneCompressor;
 let analyserNode;
-let analyserGain;
 
 let isPlaying    = false;
 let pauseOffset  = 0;
@@ -88,12 +86,15 @@ function getCurrentOffset() {
 async function buildToneGraph() {
     teardownToneGraph();
     if (!window.Tone) throw new Error('O processador de áudio não foi carregado. Verifique sua conexão e recarregue a página.');
+    if (!audioBuffer) throw new Error('Nenhum áudio foi carregado.');
     await Tone.start();
 
-    // Load exactly once. Passing the URL to the constructor and calling load()
-    // again races two decoders and fails intermittently on larger files.
-    tonePlayer = new Tone.Player({ loop: false });
-    await tonePlayer.load(audioBlobUrl);
+    // O arquivo já foi decodificado pelo AudioContext nativo no upload.
+    // Reutilizar o AudioBuffer evita uma segunda decodificação dentro do Tone.js,
+    // que podia falhar em standardized-audio-context com a mensagem
+    // "A value with the given key could not be found."
+    tonePlayer = new Tone.Player(audioBuffer);
+    tonePlayer.loop = false;
 
     tonePitchShift = new Tone.PitchShift({
         pitch: getPitchSemitones(),
@@ -133,10 +134,6 @@ async function buildToneGraph() {
         analyserNode.fftSize = 2048;
         analyserNode.smoothingTimeConstant = 0.8;
     }
-    analyserGain = Tone.getContext().rawContext.createGain();
-    analyserGain.gain.value = 1;
-    analyserGain.connect(analyserNode);
-    analyserGain.connect(Tone.getDestination().input);
 
     tonePlayer.connect(tonePitchShift);
     tonePitchShift.connect(toneBass);
@@ -146,7 +143,11 @@ async function buildToneGraph() {
     toneGain.connect(toneDelay);
     toneDelay.connect(toneReverb);
     toneReverb.connect(toneCompressor);
-    toneCompressor.connect(analyserGain);
+
+    // Mantém o caminho audível inteiramente no grafo do Tone.js.
+    // O AnalyserNode nativo recebe apenas uma derivação para medição/visualização.
+    toneCompressor.toDestination();
+    toneCompressor.connect(analyserNode);
 }
 
 function teardownToneGraph() {
@@ -159,7 +160,6 @@ function teardownToneGraph() {
     try { if (toneDelay)      { toneDelay.dispose(); }                         } catch(e){}
     try { if (toneReverb)     { toneReverb.dispose(); }                        } catch(e){}
     try { if (toneCompressor) { toneCompressor.dispose(); }                    } catch(e){}
-    try { if (analyserGain)   { analyserGain.disconnect(); }                   } catch(e){}
     tonePlayer = tonePitchShift = toneBass = toneTreble = tonePan = null;
     toneGain = toneDelay = toneReverb = toneCompressor = null;
 }
@@ -218,21 +218,10 @@ async function loadAudioFile(file) {
         cancelAnimationFrame(progressRafId);
         cancelAnimationFrame(animationId);
 
-        // Revoga blob URL anterior para liberar memória
-        if (audioBlobUrl) { URL.revokeObjectURL(audioBlobUrl); audioBlobUrl = null; }
-
-        // Cria Blob URL com o tipo MIME correto
-        const mimeMap = {
-            mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg',
-            m4a: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac'
-        };
-        const ext  = file.name.split('.').pop().toLowerCase();
-        const mime = mimeMap[ext] || file.type || 'audio/mpeg';
         const fileData = await file.arrayBuffer();
-        const blob = new Blob([fileData], { type: mime });
-        audioBlobUrl = URL.createObjectURL(blob);
 
-        // Decodifica com AudioContext nativo (para waveform/export)
+        // Decodifica uma única vez. O mesmo AudioBuffer é usado para waveform,
+        // exportação e reprodução pelo Tone.Player.
         if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
         if (audioContext.state === 'suspended') await audioContext.resume();
         const decodedBuffer = await audioContext.decodeAudioData(fileData.slice(0));
@@ -249,7 +238,6 @@ async function loadAudioFile(file) {
     } catch(err) {
         console.error('Erro ao carregar áudio:', err);
         audioBuffer = null;
-        if (audioBlobUrl) { URL.revokeObjectURL(audioBlobUrl); audioBlobUrl = null; }
         alert('Não foi possível decodificar este arquivo. Tente outro formato ou arquivo.\n\nDetalhes: ' + err.message);
     } finally {
         chooseFileBtn.disabled = false;
@@ -277,9 +265,11 @@ async function play() {
     tonePlayer.playbackRate = speed;
     if (tonePitchShift) tonePitchShift.pitch = getPitchSemitones();
 
-    const offset = Math.min(pauseOffset, getDuration() - 0.01);
-    tonePlayer.start(Tone.now(), offset);
-    playStarted = Tone.now() - offset / speed;
+    const maxOffset = Math.max(0, getDuration() - 0.01);
+    const offset = Math.max(0, Math.min(pauseOffset, maxOffset));
+    const startAt = Tone.now();
+    tonePlayer.start(startAt, offset);
+    playStarted = startAt;
     isPlaying   = true;
     showPauseIcon();
 
@@ -301,16 +291,18 @@ function _onEnded() {
 function pause() {
     if (!isPlaying) return;
     pauseOffset = getCurrentOffset();
+    isPlaying = false;
     try { tonePlayer.stop(); } catch(e){}
-    isPlaying = false; showPlayIcon();
+    showPlayIcon();
     cancelAnimationFrame(progressRafId);
     cancelAnimationFrame(animationId);
     stopLevelMeter();
 }
 
 function stop() {
+    isPlaying = false;
     try { if (tonePlayer) tonePlayer.stop(); } catch(e){}
-    isPlaying = false; pauseOffset = 0;
+    pauseOffset = 0;
     showPlayIcon(); syncProgressUI(0);
     cancelAnimationFrame(progressRafId);
     cancelAnimationFrame(animationId);
@@ -378,7 +370,7 @@ function attachListeners() {
             if (isPlaying) {
                 pauseOffset = getCurrentOffset();
                 tonePlayer.playbackRate = v;
-                playStarted = Tone.now() - pauseOffset / v;
+                playStarted = Tone.now();
             } else {
                 tonePlayer.playbackRate = v;
             }
