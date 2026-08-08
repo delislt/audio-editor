@@ -42,6 +42,7 @@ let fileNameEl, waveformCanvas, waveformCtx, playIcon, pauseIcon;
 let pitchProcessingBanner, pitchProcessingInline, eightDToggle;
 
 function initDOM() {
+    if (window.lucide) window.lucide.createIcons();
     uploadSection       = document.getElementById('uploadSection');
     fileInput           = document.getElementById('fileInput');
     playBtn             = document.getElementById('playBtn');
@@ -86,10 +87,12 @@ function getCurrentOffset() {
 // ── Tone.js Graph
 async function buildToneGraph() {
     teardownToneGraph();
+    if (!window.Tone) throw new Error('O processador de áudio não foi carregado. Verifique sua conexão e recarregue a página.');
     await Tone.start();
 
-    // Carrega via Blob URL — forma confiável de passar audio para Tone.Player
-    tonePlayer = new Tone.Player({ url: audioBlobUrl, loop: false });
+    // Load exactly once. Passing the URL to the constructor and calling load()
+    // again races two decoders and fails intermittently on larger files.
+    tonePlayer = new Tone.Player({ loop: false });
     await tonePlayer.load(audioBlobUrl);
 
     tonePitchShift = new Tone.PitchShift({
@@ -133,7 +136,7 @@ async function buildToneGraph() {
     analyserGain = Tone.getContext().rawContext.createGain();
     analyserGain.gain.value = 1;
     analyserGain.connect(analyserNode);
-    analyserNode.connect(Tone.getDestination().input);
+    analyserGain.connect(Tone.getDestination().input);
 
     tonePlayer.connect(tonePitchShift);
     tonePitchShift.connect(toneBass);
@@ -144,7 +147,6 @@ async function buildToneGraph() {
     toneDelay.connect(toneReverb);
     toneReverb.connect(toneCompressor);
     toneCompressor.connect(analyserGain);
-    toneCompressor.toDestination();
 }
 
 function teardownToneGraph() {
@@ -157,14 +159,40 @@ function teardownToneGraph() {
     try { if (toneDelay)      { toneDelay.dispose(); }                         } catch(e){}
     try { if (toneReverb)     { toneReverb.dispose(); }                        } catch(e){}
     try { if (toneCompressor) { toneCompressor.dispose(); }                    } catch(e){}
+    try { if (analyserGain)   { analyserGain.disconnect(); }                   } catch(e){}
     tonePlayer = tonePitchShift = toneBass = toneTreble = tonePan = null;
     toneGain = toneDelay = toneReverb = toneCompressor = null;
 }
 
 // ── Upload
-// Listener de change registrado aqui (os de click/drag estão no index.html)
 function attachUploadListeners() {
     if (!fileInput) return;
+    const chooseFileBtn = document.getElementById('chooseFileBtn');
+    const openFilePicker = () => {
+        fileInput.value = '';
+        fileInput.click();
+    };
+
+    chooseFileBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        openFilePicker();
+    });
+    uploadSection.addEventListener('click', e => {
+        if (!chooseFileBtn.contains(e.target)) openFilePicker();
+    });
+    ['dragenter', 'dragover'].forEach(type => uploadSection.addEventListener(type, e => {
+        e.preventDefault();
+        uploadSection.classList.add('drag-over');
+    }));
+    ['dragleave', 'dragend'].forEach(type => uploadSection.addEventListener(type, () => {
+        uploadSection.classList.remove('drag-over');
+    }));
+    uploadSection.addEventListener('drop', e => {
+        e.preventDefault();
+        uploadSection.classList.remove('drag-over');
+        const file = e.dataTransfer && e.dataTransfer.files[0];
+        if (file) loadAudioFile(file);
+    });
     fileInput.addEventListener('change', e => {
         const f = e.target.files[0];
         if (f) loadAudioFile(f);
@@ -172,11 +200,20 @@ function attachUploadListeners() {
 }
 
 async function loadAudioFile(file) {
-    currentFileName = file.name;
-    if (fileNameEl) fileNameEl.textContent = currentFileName;
+    const chooseFileBtn = document.getElementById('chooseFileBtn');
+    const originalButtonContent = chooseFileBtn.innerHTML;
+    const validExtension = file && /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(file.name);
+    if (!file || (!(file.type || '').startsWith('audio/') && !validExtension)) {
+        alert('Selecione um arquivo de áudio válido (MP3, WAV, OGG, M4A, AAC ou FLAC).');
+        return;
+    }
 
     try {
+        chooseFileBtn.disabled = true;
+        chooseFileBtn.textContent = 'Carregando…';
+        uploadSection.setAttribute('aria-busy', 'true');
         isPlaying = false; pauseOffset = 0;
+        teardownToneGraph();
         stopLevelMeter();
         cancelAnimationFrame(progressRafId);
         cancelAnimationFrame(animationId);
@@ -191,15 +228,17 @@ async function loadAudioFile(file) {
         };
         const ext  = file.name.split('.').pop().toLowerCase();
         const mime = mimeMap[ext] || file.type || 'audio/mpeg';
-        const blob = new Blob([await file.arrayBuffer()], { type: mime });
+        const fileData = await file.arrayBuffer();
+        const blob = new Blob([fileData], { type: mime });
         audioBlobUrl = URL.createObjectURL(blob);
 
         // Decodifica com AudioContext nativo (para waveform/export)
         if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
         if (audioContext.state === 'suspended') await audioContext.resume();
-        audioBuffer = await audioContext.decodeAudioData(await file.arrayBuffer());
-
-        await buildToneGraph();
+        const decodedBuffer = await audioContext.decodeAudioData(fileData.slice(0));
+        audioBuffer = decodedBuffer;
+        currentFileName = file.name;
+        if (fileNameEl) fileNameEl.textContent = currentFileName;
 
         document.querySelectorAll('.player-section').forEach(el => el.classList.add('active'));
         drawWaveform();
@@ -209,7 +248,14 @@ async function loadAudioFile(file) {
         console.log('✅ Áudio carregado:', file.name);
     } catch(err) {
         console.error('Erro ao carregar áudio:', err);
-        alert('Falha ao carregar o arquivo: ' + err.message);
+        audioBuffer = null;
+        if (audioBlobUrl) { URL.revokeObjectURL(audioBlobUrl); audioBlobUrl = null; }
+        alert('Não foi possível decodificar este arquivo. Tente outro formato ou arquivo.\n\nDetalhes: ' + err.message);
+    } finally {
+        chooseFileBtn.disabled = false;
+        chooseFileBtn.innerHTML = originalButtonContent;
+        uploadSection.removeAttribute('aria-busy');
+        if (window.lucide) window.lucide.createIcons();
     }
 }
 
@@ -217,8 +263,15 @@ async function loadAudioFile(file) {
 async function play() {
     if (!audioBuffer) return;
     if (isPlaying) { pause(); return; }
-    await Tone.start();
-    if (!tonePlayer) await buildToneGraph();
+    try {
+        if (!window.Tone) throw new Error('O processador de áudio não foi carregado. Verifique sua conexão e recarregue a página.');
+        await Tone.start();
+        if (!tonePlayer) await buildToneGraph();
+    } catch (err) {
+        console.error('Erro ao iniciar reprodução:', err);
+        alert(err.message);
+        return;
+    }
 
     const speed = getSpeedValue();
     tonePlayer.playbackRate = speed;

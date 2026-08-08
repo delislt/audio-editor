@@ -308,53 +308,6 @@
 })();
 </script>
 
-<script>
-  document.addEventListener('DOMContentLoaded', () => {
-    if (window.lucide) lucide.createIcons();
-
-    // Upload: botão "Choose File" e clique na área — ambos abrem o input corretamente
-    const fileInput    = document.getElementById('fileInput');
-    const uploadSection = document.getElementById('uploadSection');
-    const chooseFileBtn = document.getElementById('chooseFileBtn');
-
-    function openFilePicker() {
-      fileInput.value = '';   // reset para permitir selecionar o mesmo arquivo
-      fileInput.click();
-    }
-
-    // Botão "Choose File"
-    chooseFileBtn.addEventListener('click', function(e) {
-      e.stopPropagation();  // não propaga para uploadSection
-      openFilePicker();
-    });
-
-    // Clique na área de upload (exceto no botão, que já tem handler próprio)
-    uploadSection.addEventListener('click', function(e) {
-      if (e.target === chooseFileBtn || chooseFileBtn.contains(e.target)) return;
-      openFilePicker();
-    });
-
-    // Drag & drop
-    uploadSection.addEventListener('dragover', function(e) {
-      e.preventDefault();
-      uploadSection.classList.add('drag-over');
-    });
-    uploadSection.addEventListener('dragleave', function() {
-      uploadSection.classList.remove('drag-over');
-    });
-    uploadSection.addEventListener('drop', function(e) {
-      e.preventDefault();
-      uploadSection.classList.remove('drag-over');
-      const f = e.dataTransfer.files[0];
-      if (f && (f.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(f.name))) {
-        if (typeof loadAudioFile === 'function') loadAudioFile(f);
-      } else {
-        alert('Please upload a valid audio file (MP3, WAV, OGG, M4A, AAC, FLAC)');
-      }
-    });
-  });
-</script>
-
 <script src="script.js"></script>
 </body>
 </html>
