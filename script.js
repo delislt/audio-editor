@@ -12,7 +12,6 @@ let toneBass;
 let toneTreble;
 let tonePan;
 let toneReverb;
-let toneDelay;
 let toneCompressor;
 let analyserNode;
 
@@ -31,6 +30,12 @@ let isDragging      = false;
 let wasPausedBeforeDrag = false;
 let previousVolume  = 100;
 let isMuted         = false;
+let currentPresetName = 'normal';
+let presetToastTimer = null;
+let pointerRafId = null;
+let lastPointerX = 50;
+let lastPointerY = 30;
+let isApplyingPreset = false;
 
 // DOM (aguarda DOMContentLoaded para garantir que os elementos existem)
 document.addEventListener('DOMContentLoaded', initDOM);
@@ -39,6 +44,7 @@ let uploadSection, fileInput, playBtn, stopBtn, resetBtn, downloadBtn;
 let progressBar, progressFill, progressThumb, currentTimeEl, totalTimeEl;
 let fileNameEl, waveformCanvas, waveformCtx, playIcon, pauseIcon;
 let pitchProcessingBanner, pitchProcessingInline, eightDToggle;
+let activePresetNameEl, presetToast, presetToastNameEl;
 
 function initDOM() {
     if (window.lucide) window.lucide.createIcons();
@@ -61,6 +67,9 @@ function initDOM() {
     pitchProcessingBanner = document.getElementById('pitchProcessingBanner');
     pitchProcessingInline = document.getElementById('pitchProcessingInline');
     eightDToggle        = document.getElementById('eightDToggle');
+    activePresetNameEl  = document.getElementById('activePresetName');
+    presetToast         = document.getElementById('presetToast');
+    presetToastNameEl   = document.getElementById('presetToastName');
 
     waveformCanvas.width  = waveformCanvas.offsetWidth  * 2;
     waveformCanvas.height = waveformCanvas.offsetHeight * 2;
@@ -132,13 +141,6 @@ async function buildToneGraph() {
     const volVal = parseFloat(document.getElementById('volumeSlider').value) / 100;
     toneGain = new Tone.Gain(volVal);
 
-    const echoVal = parseFloat(document.getElementById('echoSlider').value) / 100;
-    toneDelay = new Tone.FeedbackDelay({
-        delayTime: 0.3,
-        feedback:  Math.min(0.55, echoVal * 0.5),
-        wet:       echoVal
-    });
-
     const revVal = parseFloat(document.getElementById('reverbSlider').value) / 100;
     toneReverb = new Tone.Reverb({ decay: 2.0, wet: revVal });
     await toneReverb.ready;
@@ -158,8 +160,7 @@ async function buildToneGraph() {
     toneBass.connect(toneTreble);
     toneTreble.connect(tonePan);
     tonePan.connect(toneGain);
-    toneGain.connect(toneDelay);
-    toneDelay.connect(toneReverb);
+    toneGain.connect(toneReverb);
     toneReverb.connect(toneCompressor);
 
     // Mantém o caminho audível inteiramente no grafo do Tone.js.
@@ -175,11 +176,10 @@ function teardownToneGraph() {
     try { if (toneTreble)     { toneTreble.dispose(); }                        } catch(e){}
     try { if (tonePan)        { tonePan.dispose(); }                           } catch(e){}
     try { if (toneGain)       { toneGain.dispose(); }                          } catch(e){}
-    try { if (toneDelay)      { toneDelay.dispose(); }                         } catch(e){}
     try { if (toneReverb)     { toneReverb.dispose(); }                        } catch(e){}
     try { if (toneCompressor) { toneCompressor.dispose(); }                    } catch(e){}
     tonePlayer = tonePitchShift = toneBass = toneTreble = tonePan = null;
-    toneGain = toneDelay = toneReverb = toneCompressor = null;
+    toneGain = toneReverb = toneCompressor = null;
 }
 
 // ── Upload
@@ -428,15 +428,6 @@ function attachListeners() {
         if (toneReverb) toneReverb.wet.value = v / 100;
     });
 
-    document.getElementById('echoSlider').addEventListener('input', e => {
-        const v = parseFloat(e.target.value);
-        document.getElementById('echoValue').textContent = v.toFixed(1) + '%';
-        if (toneDelay) {
-            toneDelay.wet.value      = v / 100;
-            toneDelay.feedback.value = Math.min(0.55, v / 100 * 0.5);
-        }
-    });
-
     // Stubs
     document.getElementById('preGainSlider').addEventListener('input', () => {});
     document.getElementById('outputGainSlider').addEventListener('input', () => {});
@@ -451,6 +442,7 @@ function attachListeners() {
         eightDToggle.classList.toggle('active');
         eightDToggle.setAttribute('aria-checked', String(eightDEnabled));
         if (eightDEnabled) start8DAudio(); else stop8DAudio();
+        if (!isApplyingPreset) markPresetCustom();
     });
     document.getElementById('eightDSpeed').addEventListener('input', e => {
         document.getElementById('eightDSpeedValue').textContent = parseFloat(e.target.value).toFixed(1);
@@ -460,12 +452,22 @@ function attachListeners() {
     // Buttons
     playBtn.addEventListener('click', play);
     stopBtn.addEventListener('click', stop);
-    resetBtn.addEventListener('click', () => applyPreset(presets.normal));
+    resetBtn.addEventListener('click', () => applyPreset(presets.normal, 'normal'));
 
     // Presets
     document.querySelectorAll('.preset-btn').forEach(btn => {
-        btn.addEventListener('click', () => { const p = presets[btn.dataset.preset]; if (p) applyPreset(p); });
+        btn.addEventListener('click', () => {
+            const presetName = btn.dataset.preset;
+            const preset = presets[presetName];
+            if (preset) applyPreset(preset, presetName);
+        });
     });
+
+    document.querySelectorAll('.preset-filter').forEach(filterBtn => {
+        filterBtn.addEventListener('click', () => filterPresets(filterBtn.dataset.filter));
+    });
+
+    initializeInteractiveDesign();
 
     // Download
     downloadBtn.addEventListener('click', handleDownload);
@@ -574,47 +576,168 @@ function stopLevelMeter() {
 
 // ── Presets
 const presets = {
-    normal:     { speed:1.00, pitch:  0, volume:100, bass: 0, treble: 0, pan:0, reverb:  0, echo: 0, eightD:false },
-    nightcore:  { speed:1.30, pitch:  3, volume:100, bass: 0, treble: 5, pan:0, reverb: 10, echo: 0, eightD:false },
-    deepbass:   { speed:0.90, pitch: -3, volume:110, bass:12, treble:-5, pan:0, reverb: 15, echo: 5, eightD:false },
-    '8daudio':  { speed:1.00, pitch:  0, volume:100, bass: 3, treble: 2, pan:0, reverb: 25, echo:15, eightD:true  },
-    concert:    { speed:1.00, pitch:  0, volume:105, bass: 8, treble: 4, pan:0, reverb: 60, echo:20, eightD:false },
-    slowcore:   { speed:0.72, pitch: -2, volume:100, bass: 4, treble:-2, pan:0, reverb: 65, echo:12, eightD:false },
-    lofi:       { speed:0.92, pitch: -1, volume: 95, bass: 6, treble:-4, pan:0, reverb: 30, echo: 8, eightD:false },
-    vaporwave:  { speed:0.80, pitch: -4, volume:100, bass: 5, treble: 0, pan:0, reverb: 50, echo:18, eightD:false },
-    phonecall:  { speed:1.00, pitch:  2, volume:100, bass:-8, treble: 6, pan:0, reverb:  5, echo: 0, eightD:false },
-    underwater: { speed:0.85, pitch: -5, volume:100, bass: 8, treble:-8, pan:0, reverb: 80, echo:30, eightD:false },
+    normal:       { label:'Normal',       speed:1.00, pitch: 0.0, volume:100, bass: 0, treble: 0, pan:  0, reverb: 0,  eightD:false, colors:['#8b5cf6','#22d3ee'] },
+    nightcore:    { label:'Nightcore',    speed:1.30, pitch: 3.0, volume:100, bass: 1, treble: 6, pan:  0, reverb: 8,  eightD:false, colors:['#ff56c7','#22d3ee'] },
+    deepbass:     { label:'Deep Bass',    speed:0.90, pitch:-3.0, volume:110, bass:15, treble:-5,pan:  0, reverb:10,  eightD:false, colors:['#7c3aed','#f43f5e'] },
+    '8daudio':    { label:'8D Orbit',      speed:1.00, pitch: 0.0, volume:100, bass: 3, treble: 2, pan:  0, reverb:24,  eightD:true,  colors:['#06b6d4','#8b5cf6'] },
+    concert:      { label:'Concert Hall',  speed:1.00, pitch: 0.0, volume:103, bass: 7, treble: 4, pan:  0, reverb:58,  eightD:false, colors:['#f59e0b','#ec4899'] },
+    slowcore:     { label:'Slowcore',      speed:0.72, pitch:-2.0, volume:100, bass: 5, treble:-2,pan:  0, reverb:62,  eightD:false, colors:['#6366f1','#94a3b8'] },
+    lofi:         { label:'Lo-Fi',         speed:0.92, pitch:-1.0, volume: 95, bass: 7, treble:-5,pan: -6, reverb:25,  eightD:false, colors:['#f59e0b','#84cc16'] },
+    vaporwave:    { label:'Vaporwave',     speed:0.80, pitch:-4.0, volume:100, bass: 5, treble: 0, pan: 12, reverb:48,  eightD:false, colors:['#ff56c7','#22d3ee'] },
+    phonecall:    { label:'Phone Call',    speed:1.00, pitch: 2.0, volume: 96, bass: 0, treble: 9, pan:  0, reverb: 3,  eightD:false, colors:['#10b981','#facc15'] },
+    underwater:   { label:'Underwater',    speed:0.85, pitch:-5.0, volume:100, bass:10, treble:-9,pan: -8, reverb:78,  eightD:false, colors:['#0284c7','#22d3ee'] },
+    hyperpop:     { label:'Hyperpop',      speed:1.15, pitch: 4.0, volume:104, bass: 4, treble:10, pan:  0, reverb:16,  eightD:false, colors:['#f43f5e','#a855f7'] },
+    cinematic:    { label:'Cinematic',     speed:0.92, pitch:-2.0, volume:105, bass:11, treble: 3, pan:  0, reverb:55,  eightD:false, colors:['#f97316','#7c3aed'] },
+    dreamscape:   { label:'Dreamscape',    speed:0.82, pitch:-3.0, volume: 94, bass: 3, treble: 2, pan: 10, reverb:74,  eightD:false, colors:['#818cf8','#f0abfc'] },
+    cathedral:    { label:'Cathedral',     speed:1.00, pitch: 0.0, volume:100, bass: 2, treble: 5, pan:  0, reverb:92,  eightD:false, colors:['#fbbf24','#a78bfa'] },
+    subterranean: { label:'Subterranean',  speed:0.68, pitch:-7.0, volume:112, bass:20, treble:-10,pan: 0, reverb:18,  eightD:false, colors:['#ef4444','#581c87'] },
+    crystal:      { label:'Crystal',       speed:1.05, pitch: 5.0, volume: 96, bass: 0, treble:13, pan:  6, reverb:34,  eightD:false, colors:['#67e8f9','#c4b5fd'] },
+    alienradio:   { label:'Alien Radio',   speed:1.10, pitch: 7.0, volume: 98, bass: 1, treble:11, pan:-18, reverb:14,  eightD:true,  colors:['#84cc16','#22d3ee'] },
+    tapewarmth:   { label:'Tape Warmth',   speed:0.96, pitch:-0.5, volume: 97, bass: 6, treble:-4,pan: -4, reverb:12,  eightD:false, colors:['#fb923c','#eab308'] }
 };
 
-function applyPreset(p) {
-    setPlaybackSpeed(p.speed);
-    document.getElementById('pitchSlider').value  = p.pitch;
-    document.getElementById('pitchValue').textContent = p.pitch.toFixed(1) + ' st';
-    document.getElementById('volumeSlider').value = p.volume;
-    document.getElementById('volumeValue').textContent = p.volume.toFixed(1) + '%';
-    document.getElementById('bassSlider').value   = p.bass;
-    document.getElementById('bassValue').textContent  = p.bass.toFixed(1) + ' dB';
-    document.getElementById('trebleSlider').value = p.treble;
-    document.getElementById('trebleValue').textContent = p.treble.toFixed(1) + ' dB';
-    document.getElementById('panSlider').value    = p.pan;
-    document.getElementById('panValue').textContent   = 'Center';
-    document.getElementById('reverbSlider').value = p.reverb;
-    document.getElementById('reverbValue').textContent = p.reverb.toFixed(1) + '%';
-    document.getElementById('echoSlider').value   = p.echo;
-    document.getElementById('echoValue').textContent  = p.echo.toFixed(1) + '%';
+function formatPanValue(value) {
+    const absolute = Math.abs(value).toFixed(1);
+    if (value === 0) return 'Center';
+    return value < 0 ? absolute + '% Left' : absolute + '% Right';
+}
 
-    if (toneGain)      toneGain.gain.value       = p.volume / 100;
-    if (toneBass)      toneBass.gain.value        = p.bass;
-    if (toneTreble)    toneTreble.gain.value      = p.treble;
-    if (tonePan && !p.eightD) tonePan.pan.value   = p.pan / 100;
-    if (toneDelay)     { toneDelay.wet.value = p.echo/100; toneDelay.feedback.value = Math.min(0.55, p.echo/100*0.5); }
-    if (toneReverb)    toneReverb.wet.value        = p.reverb / 100;
-    if (tonePitchShift) tonePitchShift.pitch       = p.pitch;
+function updateRangeFill(slider) {
+    if (!slider) return;
+    const min = parseFloat(slider.min) || 0;
+    const max = parseFloat(slider.max) || 100;
+    const value = parseFloat(slider.value);
+    const progress = max === min ? 0 : ((value - min) / (max - min)) * 100;
+    slider.style.setProperty('--range-progress', progress.toFixed(2) + '%');
+}
 
-    if (p.eightD && !eightDEnabled)      eightDToggle.click();
-    else if (!p.eightD && eightDEnabled) eightDToggle.click();
+function updateAllRangeFills() {
+    document.querySelectorAll('input[type="range"]').forEach(updateRangeFill);
+}
 
+function markPresetCustom() {
+    if (isApplyingPreset || currentPresetName === 'custom') return;
+    currentPresetName = 'custom';
+    if (activePresetNameEl) activePresetNameEl.textContent = 'Custom';
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.classList.remove('active');
+        btn.setAttribute('aria-pressed', 'false');
+    });
+}
+
+function setActivePreset(presetName, preset) {
+    currentPresetName = presetName;
+    if (activePresetNameEl) activePresetNameEl.textContent = preset.label;
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+        const isActive = btn.dataset.preset === presetName;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-pressed', String(isActive));
+    });
+
+    document.documentElement.style.setProperty('--vibe-primary', preset.colors[0]);
+    document.documentElement.style.setProperty('--vibe-secondary', preset.colors[1]);
+    document.body.dataset.vibe = presetName;
+
+    if (presetToastNameEl) presetToastNameEl.textContent = preset.label;
+    if (presetToast) {
+        clearTimeout(presetToastTimer);
+        presetToast.classList.remove('visible');
+        requestAnimationFrame(() => presetToast.classList.add('visible'));
+        presetToastTimer = setTimeout(() => presetToast.classList.remove('visible'), 1500);
+    }
+
+    document.body.classList.remove('preset-switching');
+    requestAnimationFrame(() => {
+        document.body.classList.add('preset-switching');
+        setTimeout(() => document.body.classList.remove('preset-switching'), 720);
+    });
+}
+
+function filterPresets(filterName) {
+    document.querySelectorAll('.preset-filter').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === filterName);
+    });
+    document.querySelectorAll('.preset-btn').forEach((btn, index) => {
+        const shouldShow = filterName === 'all' || btn.dataset.category === filterName;
+        btn.classList.toggle('is-hidden', !shouldShow);
+        if (shouldShow) btn.style.setProperty('--reveal-delay', (index % 6) * 35 + 'ms');
+    });
+}
+
+function applyPreset(preset, presetName = 'normal') {
+    isApplyingPreset = true;
+
+    setPlaybackSpeed(preset.speed);
+    document.getElementById('pitchSlider').value  = preset.pitch;
+    document.getElementById('pitchValue').textContent = preset.pitch.toFixed(1) + ' st';
+    document.getElementById('volumeSlider').value = preset.volume;
+    document.getElementById('volumeValue').textContent = preset.volume.toFixed(1) + '%';
+    document.getElementById('bassSlider').value   = preset.bass;
+    document.getElementById('bassValue').textContent  = preset.bass.toFixed(1) + ' dB';
+    document.getElementById('trebleSlider').value = preset.treble;
+    document.getElementById('trebleValue').textContent = preset.treble.toFixed(1) + ' dB';
+    document.getElementById('panSlider').value    = preset.pan;
+    document.getElementById('panValue').textContent = formatPanValue(preset.pan);
+    document.getElementById('reverbSlider').value = preset.reverb;
+    document.getElementById('reverbValue').textContent = preset.reverb.toFixed(1) + '%';
+
+    if (toneGain)       toneGain.gain.value         = preset.volume / 100;
+    if (toneBass)       toneBass.gain.value          = preset.bass;
+    if (toneTreble)     toneTreble.gain.value        = preset.treble;
+    if (tonePan && !preset.eightD) tonePan.pan.value = preset.pan / 100;
+    if (toneReverb)     toneReverb.wet.value         = preset.reverb / 100;
+    if (tonePitchShift) tonePitchShift.pitch         = preset.pitch;
+
+    if (preset.eightD && !eightDEnabled)      eightDToggle.click();
+    else if (!preset.eightD && eightDEnabled) eightDToggle.click();
+
+    updateAllRangeFills();
     syncProgressUI();
+    setActivePreset(presetName, preset);
+    isApplyingPreset = false;
+}
+
+function initializeInteractiveDesign() {
+    updateAllRangeFills();
+
+    document.querySelectorAll('input[type="range"]').forEach(slider => {
+        slider.addEventListener('input', () => {
+            updateRangeFill(slider);
+            markPresetCustom();
+        });
+    });
+
+    const finePointer = window.matchMedia('(pointer: fine)').matches;
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (finePointer && !reducedMotion) {
+        document.addEventListener('pointermove', event => {
+            lastPointerX = event.clientX;
+            lastPointerY = event.clientY;
+            if (pointerRafId) return;
+            pointerRafId = requestAnimationFrame(() => {
+                document.documentElement.style.setProperty('--pointer-x', lastPointerX + 'px');
+                document.documentElement.style.setProperty('--pointer-y', lastPointerY + 'px');
+                pointerRafId = null;
+            });
+        });
+
+        document.querySelectorAll('.control-group, .preset-btn').forEach(card => {
+            card.addEventListener('pointermove', event => {
+                const rect = card.getBoundingClientRect();
+                const x = (event.clientX - rect.left) / rect.width;
+                const y = (event.clientY - rect.top) / rect.height;
+                card.style.setProperty('--glow-x', (x * 100).toFixed(1) + '%');
+                card.style.setProperty('--glow-y', (y * 100).toFixed(1) + '%');
+                card.style.setProperty('--tilt-x', ((0.5 - y) * 5).toFixed(2) + 'deg');
+                card.style.setProperty('--tilt-y', ((x - 0.5) * 6).toFixed(2) + 'deg');
+            });
+            card.addEventListener('pointerleave', () => {
+                card.style.setProperty('--tilt-x', '0deg');
+                card.style.setProperty('--tilt-y', '0deg');
+            });
+        });
+    }
 }
 
 // ── Export / Download
@@ -678,10 +801,6 @@ async function handleDownload() {
         if (pan && !eightDEnabled) pan.pan.value = parseFloat(document.getElementById('panSlider').value) / 100;
         const gainN  = offCtx.createGain(); gainN.gain.value = parseFloat(document.getElementById('volumeSlider').value) / 100;
 
-        const echoV  = parseFloat(document.getElementById('echoSlider').value);
-        const delay  = offCtx.createDelay(5.0); delay.delayTime.value = 0.3;
-        const dGain  = offCtx.createGain(); dGain.gain.value = Math.min(0.55, echoV/100*0.5);
-
         const conv   = offCtx.createConvolver();
         const rDry   = offCtx.createGain();
         const rWet   = offCtx.createGain();
@@ -701,7 +820,6 @@ async function handleDownload() {
 
         src.connect(bass); bass.connect(treble); treble.connect(pan||gainN);
         if (pan) pan.connect(gainN);
-        gainN.connect(delay); delay.connect(dGain); dGain.connect(delay); dGain.connect(gainN);
         const merger = offCtx.createGain();
         gainN.connect(rDry); rDry.connect(merger);
         if (revV > 0) { gainN.connect(conv); conv.connect(rWet); rWet.connect(merger); }

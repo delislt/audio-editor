@@ -44,6 +44,7 @@
 <div class="ambient" aria-hidden="true">
   <div class="ambient-grid"></div>
   <div class="ambient-beam"></div>
+  <div class="preset-aura"></div>
   <div class="orb orb-1"></div>
   <div class="orb orb-2"></div>
   <div class="orb orb-3"></div>
@@ -114,7 +115,7 @@
       <div class="hero-features" aria-label="Product highlights">
         <span><i data-lucide="radio-tower"></i>Real time</span>
         <span><i data-lucide="shield-check"></i>100% private</span>
-        <span><i data-lucide="sparkles"></i>10 presets</span>
+        <span><i data-lucide="sparkles"></i>18 presets</span>
       </div>
     </div>
 
@@ -137,6 +138,13 @@
       <div class="floating-label label-engine"><span>LIVE</span><small>ENGINE</small></div>
     </div>
   </section>
+
+  <div class="signal-ticker" aria-hidden="true">
+    <div class="signal-track">
+      <span>REAL-TIME ENGINE</span><i></i><span>ZERO UPLOADS</span><i></i><span>18 SONIC WORLDS</span><i></i><span>LOSSLESS EXPORT</span><i></i>
+      <span>REAL-TIME ENGINE</span><i></i><span>ZERO UPLOADS</span><i></i><span>18 SONIC WORLDS</span><i></i><span>LOSSLESS EXPORT</span><i></i>
+    </div>
+  </div>
 
   <!-- Upload Section -->
   <!-- O input fica fora da uploadSection para evitar conflito de eventos -->
@@ -206,24 +214,47 @@
 
   <!-- Presets Section -->
   <div class="presets-section glass-card player-section">
-    <div class="section-header section-header-rich">
-      <div>
-        <span class="section-kicker">INSTANT CHARACTER</span>
-        <strong>Quick presets</strong>
+    <div class="preset-toolbar">
+      <div class="section-header section-header-rich">
+        <div>
+          <span class="section-kicker">18 SONIC WORLDS</span>
+          <strong>Choose your atmosphere</strong>
+        </div>
+        <i data-lucide="sparkles"></i>
       </div>
-      <i data-lucide="sparkles"></i>
+      <div class="preset-status">
+        <span>ACTIVE PRESET</span>
+        <strong id="activePresetName">Normal</strong>
+        <i></i>
+      </div>
     </div>
+
+    <div class="preset-filters" role="group" aria-label="Filter presets">
+      <button class="preset-filter active" type="button" data-filter="all">All</button>
+      <button class="preset-filter" type="button" data-filter="character">Character</button>
+      <button class="preset-filter" type="button" data-filter="space">Spatial</button>
+      <button class="preset-filter" type="button" data-filter="extreme">Extreme</button>
+    </div>
+
     <div class="presets-grid">
-      <button class="preset-btn" data-preset="normal"><i data-lucide="circle-dot"></i><span>Normal</span></button>
-      <button class="preset-btn" data-preset="nightcore"><i data-lucide="zap"></i><span>Nightcore</span></button>
-      <button class="preset-btn" data-preset="deepbass"><i data-lucide="waves"></i><span>Deep Bass</span></button>
-      <button class="preset-btn" data-preset="8daudio"><i data-lucide="rotate-3d"></i><span>8D Audio</span></button>
-      <button class="preset-btn" data-preset="concert"><i data-lucide="music"></i><span>Concert Hall</span></button>
-      <button class="preset-btn" data-preset="slowcore"><i data-lucide="cloud-drizzle"></i><span>Slowcore</span></button>
-      <button class="preset-btn" data-preset="lofi"><i data-lucide="coffee"></i><span>Lo-Fi</span></button>
-      <button class="preset-btn" data-preset="vaporwave"><i data-lucide="sunset"></i><span>Vaporwave</span></button>
-      <button class="preset-btn" data-preset="phonecall"><i data-lucide="phone"></i><span>Phone Call</span></button>
-      <button class="preset-btn" data-preset="underwater"><i data-lucide="droplets"></i><span>Underwater</span></button>
+      <button class="preset-btn active" data-code="01" data-category="essential" data-preset="normal" aria-pressed="true"><i data-lucide="circle-dot"></i><span>Normal</span><small>Clean reference</small></button>
+      <button class="preset-btn" data-code="02" data-category="extreme" data-preset="nightcore" aria-pressed="false"><i data-lucide="zap"></i><span>Nightcore</span><small>Fast + bright</small></button>
+      <button class="preset-btn" data-code="03" data-category="character" data-preset="deepbass" aria-pressed="false"><i data-lucide="waves"></i><span>Deep Bass</span><small>Heavy low end</small></button>
+      <button class="preset-btn" data-code="04" data-category="space" data-preset="8daudio" aria-pressed="false"><i data-lucide="orbit"></i><span>8D Orbit</span><small>Moving panorama</small></button>
+      <button class="preset-btn" data-code="05" data-category="space" data-preset="concert" aria-pressed="false"><i data-lucide="music"></i><span>Concert Hall</span><small>Wide live room</small></button>
+      <button class="preset-btn" data-code="06" data-category="character" data-preset="slowcore" aria-pressed="false"><i data-lucide="cloud-rain"></i><span>Slowcore</span><small>Heavy + spacious</small></button>
+      <button class="preset-btn" data-code="07" data-category="character" data-preset="lofi" aria-pressed="false"><i data-lucide="coffee"></i><span>Lo-Fi</span><small>Soft worn tape</small></button>
+      <button class="preset-btn" data-code="08" data-category="character" data-preset="vaporwave" aria-pressed="false"><i data-lucide="sunset"></i><span>Vaporwave</span><small>Dreamy retro drift</small></button>
+      <button class="preset-btn" data-code="09" data-category="essential" data-preset="phonecall" aria-pressed="false"><i data-lucide="radio"></i><span>Phone Call</span><small>Narrow + crisp</small></button>
+      <button class="preset-btn" data-code="10" data-category="space" data-preset="underwater" aria-pressed="false"><i data-lucide="droplets"></i><span>Underwater</span><small>Deep liquid haze</small></button>
+      <button class="preset-btn" data-code="11" data-category="extreme" data-preset="hyperpop" aria-pressed="false"><i data-lucide="sparkles"></i><span>Hyperpop</span><small>Glossy + electric</small></button>
+      <button class="preset-btn" data-code="12" data-category="space" data-preset="cinematic" aria-pressed="false"><i data-lucide="clapperboard"></i><span>Cinematic</span><small>Large dramatic field</small></button>
+      <button class="preset-btn" data-code="13" data-category="space" data-preset="dreamscape" aria-pressed="false"><i data-lucide="moon-star"></i><span>Dreamscape</span><small>Soft endless air</small></button>
+      <button class="preset-btn" data-code="14" data-category="space" data-preset="cathedral" aria-pressed="false"><i data-lucide="landmark"></i><span>Cathedral</span><small>Massive sacred room</small></button>
+      <button class="preset-btn" data-code="15" data-category="extreme" data-preset="subterranean" aria-pressed="false"><i data-lucide="chevrons-down"></i><span>Subterranean</span><small>Dark seismic weight</small></button>
+      <button class="preset-btn" data-code="16" data-category="character" data-preset="crystal" aria-pressed="false"><i data-lucide="gem"></i><span>Crystal</span><small>Bright detail</small></button>
+      <button class="preset-btn" data-code="17" data-category="extreme" data-preset="alienradio" aria-pressed="false"><i data-lucide="satellite"></i><span>Alien Radio</span><small>Strange transmission</small></button>
+      <button class="preset-btn" data-code="18" data-category="character" data-preset="tapewarmth" aria-pressed="false"><i data-lucide="cassette-tape"></i><span>Tape Warmth</span><small>Rounded analog glow</small></button>
     </div>
   </div>
 
@@ -291,14 +322,6 @@
       <input type="range" id="reverbSlider" min="0" max="100" step="0.5" value="0">
     </div>
 
-    <div class="control-group glass-card">
-      <div class="control-header">
-        <div class="control-label"><i data-lucide="repeat"></i><span>Echo / Delay</span></div>
-        <span class="control-value" id="echoValue">0%</span>
-      </div>
-      <input type="range" id="echoSlider" min="0" max="100" step="0.5" value="0">
-    </div>
-
     <div class="control-group glass-card toggle-card">
       <div class="control-header">
         <div class="control-label"><i data-lucide="infinity"></i><span>8D Audio</span></div>
@@ -315,6 +338,11 @@
 
   </div>
 
+</div>
+
+<div class="preset-toast" id="presetToast" aria-live="polite" aria-atomic="true">
+  <span class="preset-toast-icon"><i data-lucide="sparkles"></i></span>
+  <span><small>PRESET ACTIVATED</small><strong id="presetToastName">Normal</strong></span>
 </div>
 
 <!-- Hidden compatibility inputs -->

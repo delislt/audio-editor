@@ -34,7 +34,6 @@ Perfect for DJs, producers, podcasters, gamers, and audio enthusiasts.
 
 ### Spatial Effects
 - **Reverb** (0 to 100%)  
-- **Echo / Delay** (0 to 100%)  
 - **Stereo Pan** (-100 to +100)  
 - **3D Spatial Audio** using HRTF  
 - **8D Audio** with adjustable motion speed  
@@ -48,12 +47,11 @@ Perfect for DJs, producers, podcasters, gamers, and audio enthusiasts.
 
 ## 🎨 Presets
 
-- Normal  
-- Nightcore  
-- Deep Bass  
-- 3D Surround  
-- 8D Audio  
-- Concert Hall  
+- Normal, Nightcore, Deep Bass and 8D Orbit
+- Concert Hall, Slowcore, Lo-Fi and Vaporwave
+- Hyperpop, Cinematic, Dreamscape and Cathedral
+- Subterranean, Crystal, Alien Radio and Tape Warmth
+- Phone Call and Underwater  
 
 ---
 
@@ -119,9 +117,9 @@ Rendered offline before download for maximum quality.
 ## 📈 Project Metrics
 
 - 15+ effects  
-- 14 sliders  
+- 8 precision controls  
 - 4 toggles  
-- 6 presets  
+- 18 curated presets  
 - 9 shortcuts  
 - ~2800 lines of code  
 - Fully client-side  
