@@ -42,6 +42,8 @@
 
 <!-- Ambient background orbs -->
 <div class="ambient" aria-hidden="true">
+  <div class="ambient-grid"></div>
+  <div class="ambient-beam"></div>
   <div class="orb orb-1"></div>
   <div class="orb orb-2"></div>
   <div class="orb orb-3"></div>
@@ -62,31 +64,33 @@
     <div class="header-inner">
       <div class="brand">
         <div class="logo-mark" aria-label="Audio Editor logo">
-          <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
-            <rect width="36" height="36" rx="10" fill="var(--accent)" opacity="0.15"/>
-            <rect x="8" y="20" width="4" height="10" rx="2" fill="var(--accent)"/>
-            <rect x="14" y="14" width="4" height="16" rx="2" fill="var(--accent)" opacity="0.9"/>
-            <rect x="20" y="8" width="4" height="22" rx="2" fill="var(--accent)"/>
-            <rect x="26" y="16" width="4" height="14" rx="2" fill="var(--accent)" opacity="0.75"/>
+          <svg width="44" height="44" viewBox="0 0 44 44" fill="none" aria-hidden="true">
+            <rect x="1" y="1" width="42" height="42" rx="13" fill="url(#logoFill)" fill-opacity=".14" stroke="url(#logoStroke)"/>
+            <path d="M11 27V17M17 32V12M23 28V16M29 34V10M35 25V19" stroke="url(#logoStroke)" stroke-width="3.25" stroke-linecap="round"/>
+            <defs>
+              <linearGradient id="logoFill" x1="6" y1="5" x2="39" y2="40"><stop stop-color="#8B5CF6"/><stop offset="1" stop-color="#22D3EE"/></linearGradient>
+              <linearGradient id="logoStroke" x1="9" y1="10" x2="36" y2="34"><stop stop-color="#A78BFA"/><stop offset="1" stop-color="#22D3EE"/></linearGradient>
+            </defs>
           </svg>
         </div>
-        <div>
-          <h1>Audio Editor</h1>
-          <p class="subtitle">Browser-based real-time audio processing</p>
+        <div class="brand-copy">
+          <div class="brand-name">Audio Editor</div>
+          <div class="brand-meta"><span>SONIC STUDIO</span><span class="brand-version">v2.0</span></div>
         </div>
       </div>
       <div class="header-actions">
+        <div class="privacy-chip"><span class="status-dot"></span>Local processing</div>
         <button class="theme-toggle glass-btn icon-btn" data-theme-toggle aria-label="Switch to light mode">
           <i data-lucide="moon"></i>
         </button>
       </div>
     </div>
 
-    <!-- Keyboard shortcuts -->
     <details class="shortcuts-panel">
       <summary class="shortcuts-summary">
         <i data-lucide="keyboard"></i>
-        <span>Keyboard Shortcuts</span>
+        <span>Keyboard shortcuts</span>
+        <span class="shortcut-hint">Press Space to play</span>
         <i data-lucide="chevron-down" class="chevron"></i>
       </summary>
       <div class="shortcuts-grid">
@@ -102,28 +106,67 @@
     </details>
   </header>
 
+  <section class="hero" aria-labelledby="heroTitle">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="eyebrow-signal"></span>REAL-TIME AUDIO LAB</div>
+      <h1 id="heroTitle">Make sound<br><span>unforgettable.</span></h1>
+      <p class="hero-lede">Transform speed, pitch and space with studio-grade controls that run entirely in your browser.</p>
+      <div class="hero-features" aria-label="Product highlights">
+        <span><i data-lucide="radio-tower"></i>Real time</span>
+        <span><i data-lucide="shield-check"></i>100% private</span>
+        <span><i data-lucide="sparkles"></i>10 presets</span>
+      </div>
+    </div>
+
+    <div class="hero-art" aria-hidden="true">
+      <div class="orbit orbit-one"></div>
+      <div class="orbit orbit-two"></div>
+      <div class="spectrum">
+        <i style="--level:34%;--delay:-1.1s"></i><i style="--level:62%;--delay:-.4s"></i>
+        <i style="--level:46%;--delay:-1.8s"></i><i style="--level:88%;--delay:-.7s"></i>
+        <i style="--level:70%;--delay:-1.4s"></i><i style="--level:98%;--delay:-.2s"></i>
+        <i style="--level:58%;--delay:-1.6s"></i><i style="--level:82%;--delay:-.9s"></i>
+        <i style="--level:42%;--delay:-.3s"></i><i style="--level:74%;--delay:-1.3s"></i>
+        <i style="--level:92%;--delay:-.6s"></i><i style="--level:54%;--delay:-1.9s"></i>
+        <i style="--level:78%;--delay:-.1s"></i><i style="--level:38%;--delay:-1.5s"></i>
+        <i style="--level:66%;--delay:-.8s"></i><i style="--level:48%;--delay:-1.2s"></i>
+        <i style="--level:86%;--delay:-.5s"></i><i style="--level:56%;--delay:-1.7s"></i>
+      </div>
+      <div class="sound-core"><i data-lucide="audio-waveform"></i></div>
+      <div class="floating-label label-format"><span>24 BIT</span><small>LOSSLESS</small></div>
+      <div class="floating-label label-engine"><span>LIVE</span><small>ENGINE</small></div>
+    </div>
+  </section>
+
   <!-- Upload Section -->
   <!-- O input fica fora da uploadSection para evitar conflito de eventos -->
   <input type="file" id="fileInput" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/ogg,audio/x-m4a,audio/m4a,audio/aac,audio/flac,audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac" aria-hidden="true" tabindex="-1">
 
   <div class="upload-section glass-card" id="uploadSection">
+    <div class="upload-glow" aria-hidden="true"></div>
     <div class="upload-icon-wrap">
-      <i data-lucide="music-4" class="upload-icon-svg"></i>
+      <i data-lucide="arrow-up-from-line" class="upload-icon-svg"></i>
     </div>
-    <h2>Drop your audio file here</h2>
-    <p class="upload-hint">or click to browse</p>
-    <p class="upload-formats">MP3 &middot; WAV &middot; OGG &middot; M4A &middot; AAC &middot; FLAC</p>
+    <div class="upload-copy">
+      <span class="upload-kicker">START A NEW SESSION</span>
+      <h2>Drop your track into the studio</h2>
+      <p class="upload-hint">Your audio never leaves this device.</p>
+      <p class="upload-formats">MP3 &middot; WAV &middot; OGG &middot; M4A &middot; AAC &middot; FLAC</p>
+    </div>
     <button class="upload-btn glass-btn" id="chooseFileBtn" type="button">
-      <i data-lucide="upload"></i> Choose File
+      <span>Choose audio</span><i data-lucide="arrow-up-right"></i>
     </button>
   </div>
 
   <!-- Player Section -->
   <div class="player-section glass-card" id="playerSection">
-    <div class="file-info">
-      <i data-lucide="file-audio"></i>
-      <span>Now playing: </span>
-      <span class="file-name" id="fileName">&mdash;</span>
+    <div class="player-toolbar">
+      <div class="file-info">
+        <span class="file-icon"><i data-lucide="file-audio"></i></span>
+        <span class="file-context">NOW PLAYING</span>
+        <span class="file-name" id="fileName">&mdash;</span>
+      </div>
+      <div class="engine-status"><span></span>LIVE ENGINE</div>
     </div>
 
     <div class="waveform-container">
@@ -163,9 +206,12 @@
 
   <!-- Presets Section -->
   <div class="presets-section glass-card player-section">
-    <div class="section-header">
-      <i data-lucide="sliders-horizontal"></i>
-      <span>Quick Presets</span>
+    <div class="section-header section-header-rich">
+      <div>
+        <span class="section-kicker">INSTANT CHARACTER</span>
+        <strong>Quick presets</strong>
+      </div>
+      <i data-lucide="sparkles"></i>
     </div>
     <div class="presets-grid">
       <button class="preset-btn" data-preset="normal"><i data-lucide="circle-dot"></i><span>Normal</span></button>
