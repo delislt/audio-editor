@@ -17,6 +17,9 @@
   <!-- Tone.js (PitchShift usa phase vocoder FFT — pitch sem alterar velocidade) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 
+  <!-- LAME.js — codificação MP3 inteiramente no navegador -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+
   <!-- Favicon -->
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
@@ -103,7 +106,7 @@
       <div class="hero-features" aria-label="Product highlights">
         <span><i data-lucide="radio-tower"></i>Real time</span>
         <span><i data-lucide="shield-check"></i>100% private</span>
-        <span><i data-lucide="sparkles"></i>18 presets</span>
+        <span><i data-lucide="sparkles"></i>22 presets</span>
       </div>
     </div>
 
@@ -164,8 +167,12 @@
       <div class="engine-status"><span></span>LIVE ENGINE</div>
     </div>
 
-    <div class="waveform-container">
-      <canvas id="waveform"></canvas>
+    <div class="waveform-container" id="visualizerContainer">
+      <canvas id="waveform" aria-label="Audio waveform and live frequency spectrum"></canvas>
+      <div class="visualizer-chrome" aria-hidden="true">
+        <span class="visualizer-mode"><i data-lucide="audio-waveform"></i><b id="visualizerMode">TRACK WAVEFORM</b></span>
+        <span class="visualizer-bands">LOW&nbsp;&nbsp;•&nbsp;&nbsp;MID&nbsp;&nbsp;•&nbsp;&nbsp;HIGH</span>
+      </div>
     </div>
 
     <div class="progress-wrap">
@@ -192,10 +199,20 @@
       <button class="control-icon-btn glass-btn" id="resetBtn" aria-label="Reset all">
         <i data-lucide="refresh-ccw"></i>
       </button>
-      <button class="download-btn glass-btn" id="downloadBtn" aria-label="Download">
-        <i data-lucide="download"></i>
-        <span>Export</span>
-      </button>
+      <div class="export-group">
+        <label class="export-format" for="exportFormat">
+          <span>FORMAT</span>
+          <select id="exportFormat" aria-label="Export audio format">
+            <option value="wav">WAV • Lossless</option>
+            <option value="mp3-320">MP3 • 320 kbps</option>
+            <option value="mp3-192">MP3 • 192 kbps</option>
+          </select>
+        </label>
+        <button class="download-btn glass-btn" id="downloadBtn" aria-label="Export audio">
+          <i data-lucide="download"></i>
+          <span>Export</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -204,7 +221,7 @@
     <div class="preset-toolbar">
       <div class="section-header section-header-rich">
         <div>
-          <span class="section-kicker">18 SONIC WORLDS</span>
+          <span class="section-kicker">22 SONIC WORLDS</span>
           <strong>Choose your atmosphere</strong>
         </div>
         <i data-lucide="sparkles"></i>
@@ -221,6 +238,7 @@
       <button class="preset-filter" type="button" data-filter="character">Character</button>
       <button class="preset-filter" type="button" data-filter="space">Spatial</button>
       <button class="preset-filter" type="button" data-filter="extreme">Extreme</button>
+      <button class="preset-filter" type="button" data-filter="slowed">Slowed</button>
     </div>
 
     <div class="presets-grid">
@@ -242,6 +260,10 @@
       <button class="preset-btn" data-code="16" data-category="character" data-preset="crystal" aria-pressed="false"><i data-lucide="gem"></i><span>Crystal</span><small>Bright detail</small></button>
       <button class="preset-btn" data-code="17" data-category="extreme" data-preset="alienradio" aria-pressed="false"><i data-lucide="satellite"></i><span>Alien Radio</span><small>Strange transmission</small></button>
       <button class="preset-btn" data-code="18" data-category="character" data-preset="tapewarmth" aria-pressed="false"><i data-lucide="cassette-tape"></i><span>Tape Warmth</span><small>Rounded analog glow</small></button>
+      <button class="preset-btn" data-code="19" data-category="slowed" data-preset="slowedreverb" aria-pressed="false"><i data-lucide="cloud-moon"></i><span>Slowed + Reverb</span><small>0.85x • balanced space</small></button>
+      <button class="preset-btn" data-code="20" data-category="slowed" data-preset="softslowed" aria-pressed="false"><i data-lucide="feather"></i><span>Soft Slowed</span><small>0.92x • light reverb</small></button>
+      <button class="preset-btn" data-code="21" data-category="slowed" data-preset="deepslowed" aria-pressed="false"><i data-lucide="moon"></i><span>Deep Slowed</span><small>0.75x • deep reverb</small></button>
+      <button class="preset-btn" data-code="22" data-category="slowed" data-preset="ultraslowed" aria-pressed="false"><i data-lucide="cloud-fog"></i><span>Ultra Slowed</span><small>0.65x • huge reverb</small></button>
     </div>
   </div>
 
