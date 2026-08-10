@@ -15,8 +15,12 @@ let toneTreble;
 let tonePan;
 let toneDelay;
 let toneReverb;
+let toneReverbReady = false;
 let toneCompressor;
 let analyserNode;
+let iosAudioUnlockElement;
+let iosAudioUnlockUrl = '';
+let lastAudioPrimeAt = 0;
 
 let isPlaying    = false;
 let pauseOffset  = 0;
@@ -138,18 +142,112 @@ function setRealtimePitch(semitones, immediate = false) {
 }
 
 // ── Tone.js Graph
+function isIOSDevice() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function createSilentWavUrl() {
+    const sampleRate = 8000;
+    const sampleCount = 80;
+    const buffer = new ArrayBuffer(44 + sampleCount * 2);
+    const view = new DataView(buffer);
+    const writeText = (offset, value) => {
+        for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i));
+    };
+
+    writeText(0, 'RIFF');
+    view.setUint32(4, 36 + sampleCount * 2, true);
+    writeText(8, 'WAVE');
+    writeText(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeText(36, 'data');
+    view.setUint32(40, sampleCount * 2, true);
+
+    return URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
+}
+
+function primeIOSAudioSession() {
+    if (!isIOSDevice()) return;
+    if (!iosAudioUnlockElement) {
+        iosAudioUnlockUrl = createSilentWavUrl();
+        iosAudioUnlockElement = new Audio();
+        iosAudioUnlockElement.preload = 'auto';
+        iosAudioUnlockElement.setAttribute('playsinline', '');
+        iosAudioUnlockElement.src = iosAudioUnlockUrl;
+    }
+
+    try {
+        iosAudioUnlockElement.currentTime = 0;
+        const playPromise = iosAudioUnlockElement.play();
+        if (playPromise && typeof playPromise.catch === 'function') playPromise.catch(() => {});
+    } catch (error) {}
+}
+
 function getToneContext() {
     if (!window.Tone || typeof Tone.getContext !== 'function') {
         throw new Error('The audio engine could not be loaded. Check your connection and reload the page.');
     }
 
-    // Tone.js 14.8 creates its real AudioContext lazily. Calling getContext()
-    // before Tone.start() ensures the context being resumed is the playback one.
-    const context = Tone.getContext();
+    let context = Tone.getContext();
     if (!context || !context.rawContext) {
         throw new Error('The real-time audio context could not be created.');
     }
+
+    if (context.rawContext.state === 'closed') {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass || typeof Tone.setContext !== 'function') {
+            throw new Error('The real-time audio context could not be restarted.');
+        }
+
+        teardownToneGraph();
+        try { if (analyserNode) analyserNode.disconnect(); } catch (error) {}
+        analyserNode = null;
+
+        let freshRawContext;
+        try {
+            freshRawContext = new AudioContextClass({ latencyHint: 'interactive' });
+        } catch (error) {
+            freshRawContext = new AudioContextClass();
+        }
+        Tone.setContext(freshRawContext);
+        audioContext = freshRawContext;
+        context = Tone.getContext();
+    }
+
     return context;
+}
+
+function requestRealtimeAudioUnlock() {
+    const now = Date.now();
+    if (now - lastAudioPrimeAt < 120) return;
+    lastAudioPrimeAt = now;
+    primeIOSAudioSession();
+
+    if (!window.Tone) return;
+    try {
+        const rawToneContext = getToneContext().rawContext;
+        if (rawToneContext.state !== 'running' && typeof rawToneContext.resume === 'function') {
+            const resumePromise = rawToneContext.resume();
+            if (resumePromise && typeof resumePromise.catch === 'function') resumePromise.catch(() => {});
+        }
+
+        const silentSource = rawToneContext.createBufferSource();
+        silentSource.buffer = rawToneContext.createBuffer(1, 1, rawToneContext.sampleRate);
+        silentSource.connect(rawToneContext.destination);
+        silentSource.onended = () => {
+            try { silentSource.disconnect(); } catch (error) {}
+        };
+        silentSource.start(0);
+    } catch (error) {
+        console.warn('Audio unlock request failed:', error);
+    }
 }
 
 function getSharedAudioContext() {
@@ -167,11 +265,34 @@ function getSharedAudioContext() {
 async function ensureRealtimeAudioContext() {
     const toneContext = getToneContext();
     const rawToneContext = toneContext.rawContext;
+    const resumeAttempts = [];
 
-    await Tone.start();
+    try {
+        resumeAttempts.push(Promise.resolve(Tone.start()));
+    } catch (error) {}
+
     if (rawToneContext.state !== 'running' && typeof rawToneContext.resume === 'function') {
-        await rawToneContext.resume();
+        try {
+            resumeAttempts.push(Promise.resolve(rawToneContext.resume()));
+        } catch (error) {}
     }
+
+    if (resumeAttempts.length) {
+        await withTimeout(
+            Promise.all(resumeAttempts.map(attempt => attempt.catch(() => undefined))),
+            4000,
+            'Audio startup timed out. Tap Play again.'
+        );
+    }
+
+    if (rawToneContext.state !== 'running' && typeof rawToneContext.resume === 'function') {
+        await withTimeout(
+            Promise.resolve(rawToneContext.resume()),
+            2000,
+            'Audio output is still blocked. Tap Play again.'
+        );
+    }
+
     if (rawToneContext.state !== 'running') {
         throw new Error('Audio output is blocked. Tap Play again and check the browser sound settings.');
     }
@@ -225,9 +346,16 @@ async function buildToneGraph() {
         wet: echoVal
     });
 
-    const revVal = parseFloat(document.getElementById('reverbSlider').value) / 100;
-    toneReverb = new Tone.Reverb({ decay: 2.0, wet: revVal });
-    await toneReverb.ready;
+    toneReverbReady = false;
+    const reverbNode = new Tone.Reverb({ decay: 2.0, wet: 0 });
+    toneReverb = reverbNode;
+    Promise.resolve(reverbNode.ready).then(() => {
+        if (toneReverb !== reverbNode) return;
+        toneReverbReady = true;
+        reverbNode.wet.value = parseFloat(document.getElementById('reverbSlider').value) / 100;
+    }).catch(error => {
+        console.warn('Reverb initialization failed; playback will continue without reverb:', error);
+    });
 
     toneCompressor = new Tone.Compressor({
         threshold: -6, knee: 0, ratio: 20, attack: 0.003, release: 0.1
@@ -273,6 +401,7 @@ function teardownToneGraph() {
     tonePlayer = tonePitchShift = tonePitchDry = tonePitchWet = null;
     toneBass = toneTreble = tonePan = toneGain = null;
     toneDelay = toneReverb = toneCompressor = null;
+    toneReverbReady = false;
 }
 
 // ── Upload
@@ -286,7 +415,10 @@ function attachUploadListeners() {
 
     // O uploadSection é um label ligado ao input. Em celulares, essa ativação
     // nativa é mais confiável do que abrir o seletor apenas com input.click().
-    uploadSection.addEventListener('pointerdown', resetFileInput);
+    uploadSection.addEventListener('pointerdown', () => {
+        requestRealtimeAudioUnlock();
+        resetFileInput();
+    });
     uploadSection.addEventListener('keydown', e => {
         if (e.key !== 'Enter' && e.key !== ' ') return;
         e.preventDefault();
@@ -515,6 +647,7 @@ async function loadAudioFile(file) {
 
 // ── Playback
 async function play() {
+    requestRealtimeAudioUnlock();
     if (!audioBuffer) return;
     if (isPlaying) { pause(); return; }
     try {
@@ -680,7 +813,7 @@ function attachListeners() {
     document.getElementById('reverbSlider').addEventListener('input', e => {
         const v = parseFloat(e.target.value);
         document.getElementById('reverbValue').textContent = v.toFixed(1) + '%';
-        if (toneReverb) toneReverb.wet.value = v / 100;
+        if (toneReverb && toneReverbReady) toneReverb.wet.value = v / 100;
     });
 
     document.getElementById('echoSlider').addEventListener('input', e => {
@@ -714,6 +847,8 @@ function attachListeners() {
     });
 
     // Buttons
+    playBtn.addEventListener('pointerdown', requestRealtimeAudioUnlock, { passive: true });
+    playBtn.addEventListener('touchstart', requestRealtimeAudioUnlock, { passive: true });
     playBtn.addEventListener('click', play);
     stopBtn.addEventListener('click', stop);
     resetBtn.addEventListener('click', () => applyPreset(presets.normal, 'normal'));
@@ -1161,7 +1296,7 @@ function applyPreset(preset, presetName = 'normal') {
         toneDelay.wet.value = preset.echo / 100;
         toneDelay.feedback.value = Math.min(0.55, preset.echo / 100 * 0.5);
     }
-    if (toneReverb)     toneReverb.wet.value         = preset.reverb / 100;
+    if (toneReverb && toneReverbReady) toneReverb.wet.value = preset.reverb / 100;
     setRealtimePitch(preset.pitch);
 
     if (preset.eightD && !eightDEnabled)      eightDToggle.click();
