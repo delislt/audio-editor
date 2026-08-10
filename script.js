@@ -1220,13 +1220,14 @@ function initializeInteractiveDesign() {
 async function handleDownload() {
     if (!audioBuffer) { alert('Load an audio file first.'); return; }
 
-    const formatSelect = document.getElementById('exportFormat');
-    const exportFormat = formatSelect ? formatSelect.value : 'wav';
+    const formatInputs = Array.from(document.querySelectorAll('input[name="exportFormat"]'));
+    const selectedFormat = formatInputs.find(input => input.checked);
+    const exportFormat = selectedFormat ? selectedFormat.value : 'wav';
 
     try {
         downloadBtn.querySelector('span').textContent = 'Rendering...';
         downloadBtn.disabled = true;
-        if (formatSelect) formatSelect.disabled = true;
+        formatInputs.forEach(input => { input.disabled = true; });
 
         const pitch = getPitchSemitones();
         const speed = getSpeedValue();
@@ -1368,7 +1369,7 @@ async function handleDownload() {
     } finally {
         downloadBtn.querySelector('span').textContent = 'Export';
         downloadBtn.disabled = false;
-        if (formatSelect) formatSelect.disabled = false;
+        formatInputs.forEach(input => { input.disabled = false; });
     }
 }
 
