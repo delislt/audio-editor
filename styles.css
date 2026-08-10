@@ -400,7 +400,25 @@ kbd {
   box-shadow: 0 0 60px var(--accent2-glow);
   transform: scale(1.01);
 }
-#fileInput { display: none; }
+#fileInput {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.upload-section {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.upload-section[aria-busy="true"] {
+  pointer-events: none;
+  opacity: .72;
+}
 
 /* Upload icon — no circle, just the floating icon */
 .upload-icon-wrap {

@@ -34,6 +34,7 @@ Perfect for DJs, producers, podcasters, gamers, and audio enthusiasts.
 
 ### Spatial Effects
 - **Reverb** (0 to 100%)  
+- **Echo / Delay** (0 to 100%, 300 ms delay)  
 - **Stereo Pan** (-100 to +100)  
 - **3D Spatial Audio** using HRTF  
 - **8D Audio** with adjustable motion speed  
@@ -80,7 +81,7 @@ Perfect for DJs, producers, podcasters, gamers, and audio enthusiasts.
 
 ## 📥 Import & Export
 
-**Input:** MP3, WAV, OGG via drag & drop or file picker.  
+**Input:** MP3, WAV, OGG, M4A, AAC, and FLAC via drag & drop or file picker.  
 **Output:** WAV file, normalized, with all effects applied.  
 Rendered offline before download for maximum quality.
 
