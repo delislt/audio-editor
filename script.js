@@ -112,11 +112,53 @@ function setPlaybackSpeed(speed) {
 }
 
 // ── Tone.js Graph
+function getToneContext() {
+    if (!window.Tone || typeof Tone.getContext !== 'function') {
+        throw new Error('The audio engine could not be loaded. Check your connection and reload the page.');
+    }
+
+    // Tone.js 14.8 creates its real AudioContext lazily. Calling getContext()
+    // before Tone.start() ensures the context being resumed is the playback one.
+    const context = Tone.getContext();
+    if (!context || !context.rawContext) {
+        throw new Error('The real-time audio context could not be created.');
+    }
+    return context;
+}
+
+function getSharedAudioContext() {
+    if (window.Tone && typeof Tone.getContext === 'function') {
+        const rawToneContext = getToneContext().rawContext;
+        if (rawToneContext.state !== 'closed') return rawToneContext;
+    }
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) throw new Error('This browser does not support audio decoding.');
+    if (!audioContext || audioContext.state === 'closed') audioContext = new AudioContextClass();
+    return audioContext;
+}
+
+async function ensureRealtimeAudioContext() {
+    const toneContext = getToneContext();
+    const rawToneContext = toneContext.rawContext;
+
+    await Tone.start();
+    if (rawToneContext.state !== 'running' && typeof rawToneContext.resume === 'function') {
+        await rawToneContext.resume();
+    }
+    if (rawToneContext.state !== 'running') {
+        throw new Error('Audio output is blocked. Tap Play again and check the browser sound settings.');
+    }
+
+    audioContext = rawToneContext;
+    return rawToneContext;
+}
+
 async function buildToneGraph() {
     teardownToneGraph();
     if (!window.Tone) throw new Error('The audio engine could not be loaded. Check your connection and reload the page.');
     if (!audioBuffer) throw new Error('No audio file has been loaded.');
-    await Tone.start();
+    const rawToneContext = getToneContext().rawContext;
 
     // O arquivo já foi decodificado pelo AudioContext nativo no upload.
     // Reutilizar o AudioBuffer evita uma segunda decodificação dentro do Tone.js,
@@ -158,8 +200,9 @@ async function buildToneGraph() {
         threshold: -6, knee: 0, ratio: 20, attack: 0.003, release: 0.1
     });
 
-    if (!analyserNode) {
-        analyserNode = Tone.getContext().rawContext.createAnalyser();
+    if (!analyserNode || analyserNode.context !== rawToneContext) {
+        try { if (analyserNode) analyserNode.disconnect(); } catch (error) {}
+        analyserNode = rawToneContext.createAnalyser();
         analyserNode.fftSize = 2048;
         analyserNode.smoothingTimeConstant = 0.8;
     }
@@ -392,9 +435,9 @@ async function loadAudioFile(file) {
         );
 
         chooseFileBtn.textContent = 'Decoding...';
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContextClass) throw new Error('This browser does not support audio decoding.');
-        if (!audioContext || audioContext.state === 'closed') audioContext = new AudioContextClass();
+        // Decode and play through the same AudioContext. This avoids a suspended
+        // secondary context taking over the mobile audio session.
+        audioContext = getSharedAudioContext();
 
         // Decoding does not require the AudioContext to be resumed. FLAC uses
         // a dedicated WebAssembly decoder because native support varies by browser.
@@ -437,8 +480,9 @@ async function play() {
     if (isPlaying) { pause(); return; }
     try {
         if (!window.Tone) throw new Error('The audio engine could not be loaded. Check your connection and reload the page.');
-        await Tone.start();
-        if (!tonePlayer) await buildToneGraph();
+        await ensureRealtimeAudioContext();
+        if (!tonePlayer || !tonePlayer.loaded) await buildToneGraph();
+        await ensureRealtimeAudioContext();
     } catch (err) {
         console.error('Playback error:', err);
         alert(err.message);
