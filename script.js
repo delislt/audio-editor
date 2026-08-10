@@ -72,8 +72,8 @@ function initDOM() {
     presetToast         = document.getElementById('presetToast');
     presetToastNameEl   = document.getElementById('presetToastName');
 
-    waveformCanvas.width  = waveformCanvas.offsetWidth  * 2;
-    waveformCanvas.height = waveformCanvas.offsetHeight * 2;
+    resizeWaveformCanvas();
+    drawVisualizerIdle();
 
     attachListeners();
 }
@@ -318,6 +318,8 @@ function _onEnded() {
     cancelAnimationFrame(progressRafId);
     cancelAnimationFrame(animationId);
     stopLevelMeter();
+    setVisualizerLive(false);
+    drawWaveform();
 }
 
 function pause() {
@@ -329,6 +331,8 @@ function pause() {
     cancelAnimationFrame(progressRafId);
     cancelAnimationFrame(animationId);
     stopLevelMeter();
+    setVisualizerLive(false);
+    drawWaveform();
 }
 
 function stop() {
@@ -339,6 +343,8 @@ function stop() {
     cancelAnimationFrame(progressRafId);
     cancelAnimationFrame(animationId);
     stopLevelMeter();
+    setVisualizerLive(false);
+    drawWaveform();
 }
 
 // ── Progress UI
@@ -498,7 +504,10 @@ function attachListeners() {
     document.addEventListener('keydown', handleKeydown);
 
     // Resize
-    window.addEventListener('resize', () => { if (audioBuffer) drawWaveform(); });
+    window.addEventListener('resize', () => {
+        resizeWaveformCanvas();
+        if (!isPlaying) drawWaveform();
+    });
 }
 
 // ── 8D Audio
@@ -517,46 +526,231 @@ function stop8DAudio() {
 }
 
 // ── Waveform / Visualize
-function drawWaveform() {
-    if (!waveformCanvas) return;
-    const w = waveformCanvas.width  = waveformCanvas.offsetWidth  * 2;
-    const h = waveformCanvas.height = waveformCanvas.offsetHeight * 2;
-    const data = audioBuffer.getChannelData(0);
-    const step = Math.ceil(data.length / w), amp = h / 2;
-    waveformCtx.fillStyle = 'rgba(15,15,30,1)';
-    waveformCtx.fillRect(0, 0, w, h);
-    waveformCtx.beginPath();
-    waveformCtx.strokeStyle = '#667eea'; waveformCtx.lineWidth = 2;
-    for (let i = 0; i < w; i++) {
-        let mn = 1, mx = -1;
-        for (let j = 0; j < step; j++) { const d = data[i*step+j]||0; if(d<mn)mn=d; if(d>mx)mx=d; }
-        const y = (1 + mn) * amp;
-        if (i === 0) waveformCtx.moveTo(i, y); else waveformCtx.lineTo(i, y);
+function resizeWaveformCanvas() {
+    if (!waveformCanvas) return { width: 1, height: 1, dpr: 1 };
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const rect = waveformCanvas.getBoundingClientRect();
+    const width = Math.max(1, Math.round(rect.width * dpr));
+    const height = Math.max(1, Math.round(rect.height * dpr));
+    if (waveformCanvas.width !== width || waveformCanvas.height !== height) {
+        waveformCanvas.width = width;
+        waveformCanvas.height = height;
     }
+    return { width, height, dpr };
+}
+
+function getVisualizerColors() {
+    const styles = getComputedStyle(document.documentElement);
+    return {
+        primary: styles.getPropertyValue('--vibe-primary').trim() || '#8b5cf6',
+        secondary: styles.getPropertyValue('--vibe-secondary').trim() || '#22d3ee',
+        light: document.documentElement.getAttribute('data-theme') === 'light'
+    };
+}
+
+function drawVisualizerBackdrop(width, height, colors) {
+    const background = waveformCtx.createLinearGradient(0, 0, width, height);
+    if (colors.light) {
+        background.addColorStop(0, '#eef0fb');
+        background.addColorStop(0.5, '#e3e8f6');
+        background.addColorStop(1, '#edf7fa');
+    } else {
+        background.addColorStop(0, '#070813');
+        background.addColorStop(0.5, '#0c0d1b');
+        background.addColorStop(1, '#071319');
+    }
+    waveformCtx.fillStyle = background;
+    waveformCtx.fillRect(0, 0, width, height);
+
+    waveformCtx.save();
+    waveformCtx.strokeStyle = colors.light ? 'rgba(79,70,130,.09)' : 'rgba(255,255,255,.045)';
+    waveformCtx.lineWidth = 1;
+    const grid = Math.max(24, Math.round(width / 28));
+    for (let x = 0; x <= width; x += grid) {
+        waveformCtx.beginPath();
+        waveformCtx.moveTo(x, 0);
+        waveformCtx.lineTo(x, height);
+        waveformCtx.stroke();
+    }
+    for (let y = 0; y <= height; y += grid) {
+        waveformCtx.beginPath();
+        waveformCtx.moveTo(0, y);
+        waveformCtx.lineTo(width, y);
+        waveformCtx.stroke();
+    }
+    waveformCtx.restore();
+}
+
+function setVisualizerLive(live) {
+    const container = document.getElementById('visualizerContainer');
+    const label = document.getElementById('visualizerMode');
+    if (container) container.classList.toggle('is-live', live);
+    if (label) label.textContent = live ? 'LIVE SPECTRUM' : 'TRACK WAVEFORM';
+}
+
+function drawVisualizerIdle() {
+    if (!waveformCanvas || !waveformCtx) return;
+    const { width, height, dpr } = resizeWaveformCanvas();
+    const colors = getVisualizerColors();
+    drawVisualizerBackdrop(width, height, colors);
+
+    const center = height / 2;
+    const barCount = 56;
+    const gap = 3 * dpr;
+    const barWidth = Math.max(2 * dpr, (width - gap * (barCount - 1)) / barCount);
+    const gradient = waveformCtx.createLinearGradient(0, center - height * .25, 0, center + height * .25);
+    gradient.addColorStop(0, colors.primary);
+    gradient.addColorStop(1, colors.secondary);
+    waveformCtx.fillStyle = gradient;
+    waveformCtx.globalAlpha = .42;
+    for (let i = 0; i < barCount; i++) {
+        const envelope = Math.sin((i / (barCount - 1)) * Math.PI);
+        const variation = .35 + .65 * Math.abs(Math.sin(i * 1.73));
+        const barHeight = (6 * dpr) + envelope * variation * height * .22;
+        const x = i * (barWidth + gap);
+        waveformCtx.fillRect(x, center - barHeight, barWidth, barHeight * 2);
+    }
+    waveformCtx.globalAlpha = 1;
+}
+
+function drawWaveform() {
+    if (!waveformCanvas || !waveformCtx) return;
+    if (!audioBuffer) {
+        drawVisualizerIdle();
+        return;
+    }
+
+    setVisualizerLive(false);
+    const { width, height, dpr } = resizeWaveformCanvas();
+    const colors = getVisualizerColors();
+    drawVisualizerBackdrop(width, height, colors);
+
+    const data = audioBuffer.getChannelData(0);
+    const columns = Math.max(160, Math.floor(width / (2 * dpr)));
+    const step = Math.max(1, Math.floor(data.length / columns));
+    const top = new Float32Array(columns);
+    const bottom = new Float32Array(columns);
+
+    for (let i = 0; i < columns; i++) {
+        let min = 1;
+        let max = -1;
+        const start = i * step;
+        const end = Math.min(data.length, start + step);
+        for (let j = start; j < end; j++) {
+            const sample = data[j];
+            if (sample < min) min = sample;
+            if (sample > max) max = sample;
+        }
+        top[i] = max;
+        bottom[i] = min;
+    }
+
+    const center = height / 2;
+    const amplitude = height * .38;
+    const xStep = width / Math.max(1, columns - 1);
+    const fill = waveformCtx.createLinearGradient(0, center - amplitude, 0, center + amplitude);
+    fill.addColorStop(0, colors.primary);
+    fill.addColorStop(.48, colors.secondary);
+    fill.addColorStop(.52, colors.secondary);
+    fill.addColorStop(1, colors.primary);
+
+    waveformCtx.save();
+    waveformCtx.beginPath();
+    waveformCtx.moveTo(0, center - top[0] * amplitude);
+    for (let i = 1; i < columns; i++) waveformCtx.lineTo(i * xStep, center - top[i] * amplitude);
+    for (let i = columns - 1; i >= 0; i--) waveformCtx.lineTo(i * xStep, center - bottom[i] * amplitude);
+    waveformCtx.closePath();
+    waveformCtx.fillStyle = fill;
+    waveformCtx.globalAlpha = colors.light ? .62 : .72;
+    waveformCtx.shadowColor = colors.primary;
+    waveformCtx.shadowBlur = 22 * dpr;
+    waveformCtx.fill();
+    waveformCtx.restore();
+
+    waveformCtx.strokeStyle = colors.light ? 'rgba(50,45,90,.24)' : 'rgba(255,255,255,.18)';
+    waveformCtx.lineWidth = dpr;
+    waveformCtx.beginPath();
+    waveformCtx.moveTo(0, center);
+    waveformCtx.lineTo(width, center);
     waveformCtx.stroke();
 }
 
 function visualize() {
-    if (!waveformCanvas) return;
-    const w = waveformCanvas.width, h = waveformCanvas.height;
-    const bufLen = analyserNode ? analyserNode.frequencyBinCount : 1024;
-    const data   = new Uint8Array(bufLen);
+    if (!waveformCanvas || !waveformCtx || !analyserNode) return;
+    setVisualizerLive(true);
+
+    const frequencyData = new Uint8Array(analyserNode.frequencyBinCount);
+    const waveformData = new Uint8Array(analyserNode.frequencyBinCount);
+
     function draw() {
         if (!isPlaying) return;
         animationId = requestAnimationFrame(draw);
-        if (analyserNode) analyserNode.getByteTimeDomainData(data);
-        waveformCtx.fillStyle = 'rgba(15,15,30,0.3)';
-        waveformCtx.fillRect(0, 0, w, h);
-        waveformCtx.lineWidth = 3; waveformCtx.strokeStyle = '#764ba2';
-        waveformCtx.beginPath();
-        const sw = w / bufLen; let x = 0;
-        for (let i = 0; i < bufLen; i++) {
-            const y = (data[i] / 128.0) * h / 2;
-            if (i === 0) waveformCtx.moveTo(x, y); else waveformCtx.lineTo(x, y);
-            x += sw;
+
+        const { width, height, dpr } = resizeWaveformCanvas();
+        const colors = getVisualizerColors();
+        analyserNode.getByteFrequencyData(frequencyData);
+        analyserNode.getByteTimeDomainData(waveformData);
+        drawVisualizerBackdrop(width, height, colors);
+
+        let bassEnergy = 0;
+        const bassBins = Math.min(24, frequencyData.length);
+        for (let i = 0; i < bassBins; i++) bassEnergy += frequencyData[i];
+        bassEnergy = bassEnergy / Math.max(1, bassBins) / 255;
+
+        const glow = waveformCtx.createRadialGradient(width * .5, height * .5, 0, width * .5, height * .5, width * .55);
+        glow.addColorStop(0, colors.secondary);
+        glow.addColorStop(1, 'transparent');
+        waveformCtx.fillStyle = glow;
+        waveformCtx.globalAlpha = .05 + bassEnergy * .15;
+        waveformCtx.fillRect(0, 0, width, height);
+        waveformCtx.globalAlpha = 1;
+
+        const barCount = Math.max(36, Math.min(92, Math.floor(width / (9 * dpr))));
+        const gap = 3 * dpr;
+        const barWidth = Math.max(2 * dpr, (width - gap * (barCount - 1)) / barCount);
+        const usableBins = Math.floor(frequencyData.length * .58);
+        const binStep = usableBins / barCount;
+        const center = height / 2;
+        const barsGradient = waveformCtx.createLinearGradient(0, center - height * .42, 0, center + height * .42);
+        barsGradient.addColorStop(0, colors.primary);
+        barsGradient.addColorStop(.5, colors.secondary);
+        barsGradient.addColorStop(1, colors.primary);
+
+        waveformCtx.save();
+        waveformCtx.fillStyle = barsGradient;
+        waveformCtx.shadowColor = colors.secondary;
+        waveformCtx.shadowBlur = 12 * dpr;
+        for (let i = 0; i < barCount; i++) {
+            const bin = Math.min(frequencyData.length - 1, Math.floor(i * binStep));
+            const value = frequencyData[bin] / 255;
+            const shaped = Math.pow(value, .72);
+            const barHeight = 3 * dpr + shaped * height * .38;
+            const x = i * (barWidth + gap);
+            waveformCtx.globalAlpha = .28 + shaped * .72;
+            waveformCtx.fillRect(x, center - barHeight, barWidth, barHeight * 2);
         }
-        waveformCtx.lineTo(w, h / 2); waveformCtx.stroke();
+        waveformCtx.restore();
+
+        const waveGradient = waveformCtx.createLinearGradient(0, 0, width, 0);
+        waveGradient.addColorStop(0, colors.primary);
+        waveGradient.addColorStop(.5, '#ffffff');
+        waveGradient.addColorStop(1, colors.secondary);
+        waveformCtx.beginPath();
+        for (let x = 0; x < width; x += Math.max(1, dpr * 2)) {
+            const index = Math.min(waveformData.length - 1, Math.floor((x / width) * waveformData.length));
+            const value = (waveformData[index] - 128) / 128;
+            const y = center + value * height * .19;
+            if (x === 0) waveformCtx.moveTo(x, y);
+            else waveformCtx.lineTo(x, y);
+        }
+        waveformCtx.strokeStyle = waveGradient;
+        waveformCtx.lineWidth = 2 * dpr;
+        waveformCtx.shadowColor = colors.primary;
+        waveformCtx.shadowBlur = 12 * dpr;
+        waveformCtx.stroke();
+        waveformCtx.shadowBlur = 0;
     }
+
     draw();
 }
 
@@ -615,7 +809,11 @@ const presets = {
     subterranean: { label:'Subterranean',  speed:0.68, pitch:-7.0, volume:112, bass:20, treble:-10,pan: 0, reverb:18, echo: 0, eightD:false, colors:['#ef4444','#581c87'] },
     crystal:      { label:'Crystal',       speed:1.05, pitch: 5.0, volume: 96, bass: 0, treble:13, pan:  6, reverb:34, echo: 0, eightD:false, colors:['#67e8f9','#c4b5fd'] },
     alienradio:   { label:'Alien Radio',   speed:1.10, pitch: 7.0, volume: 98, bass: 1, treble:11, pan:-18, reverb:14, echo: 0, eightD:true,  colors:['#84cc16','#22d3ee'] },
-    tapewarmth:   { label:'Tape Warmth',   speed:0.96, pitch:-0.5, volume: 97, bass: 6, treble:-4,pan: -4, reverb:12, echo: 0, eightD:false, colors:['#fb923c','#eab308'] }
+    tapewarmth:   { label:'Tape Warmth',   speed:0.96, pitch:-0.5, volume: 97, bass: 6, treble:-4,pan: -4, reverb:12, echo: 0, eightD:false, colors:['#fb923c','#eab308'] },
+    slowedreverb: { label:'Slowed + Reverb', speed:0.85, pitch: 0.0, volume:100, bass: 0, treble: 0, pan: 0, reverb:50, echo: 0, eightD:false, colors:['#8b5cf6','#38bdf8'] },
+    softslowed:   { label:'Soft Slowed',      speed:0.92, pitch: 0.0, volume:100, bass: 0, treble: 0, pan: 0, reverb:30, echo: 0, eightD:false, colors:['#a78bfa','#67e8f9'] },
+    deepslowed:   { label:'Deep Slowed',      speed:0.75, pitch: 0.0, volume:100, bass: 0, treble: 0, pan: 0, reverb:65, echo: 0, eightD:false, colors:['#6366f1','#0ea5e9'] },
+    ultraslowed:  { label:'Ultra Slowed',     speed:0.65, pitch: 0.0, volume:100, bass: 0, treble: 0, pan: 0, reverb:82, echo: 0, eightD:false, colors:['#4f46e5','#7dd3fc'] }
 };
 
 function formatPanValue(value) {
@@ -771,9 +969,14 @@ function initializeInteractiveDesign() {
 // ── Export / Download
 async function handleDownload() {
     if (!audioBuffer) { alert('Carregue um arquivo de áudio primeiro.'); return; }
+
+    const formatSelect = document.getElementById('exportFormat');
+    const exportFormat = formatSelect ? formatSelect.value : 'wav';
+
     try {
-        downloadBtn.querySelector('span').textContent = 'Processing...';
+        downloadBtn.querySelector('span').textContent = 'Rendering...';
         downloadBtn.disabled = true;
+        if (formatSelect) formatSelect.disabled = true;
 
         const pitch = getPitchSemitones();
         const speed = getSpeedValue();
@@ -817,8 +1020,12 @@ async function handleDownload() {
             pitchedBuf = await oCtx.startRendering();
         }
 
-        const finalLen = Math.ceil(pitchedBuf.length / speed);
-        const offCtx   = new OfflineAudioContext(2, finalLen, sr);
+        const echoV = parseFloat(document.getElementById('echoSlider').value) / 100;
+        const revV = parseFloat(document.getElementById('reverbSlider').value) / 100;
+        const tailSeconds = Math.max(revV > 0 ? 2.25 : 0, echoV > 0 ? 3 : 0);
+        const finalLen = Math.ceil(pitchedBuf.length / speed + tailSeconds * sr);
+        const OfflineContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        const offCtx = new OfflineContext(2, finalLen, sr);
         const src      = offCtx.createBufferSource();
         src.buffer     = pitchedBuf;
         src.playbackRate.value = speed;
@@ -829,7 +1036,6 @@ async function handleDownload() {
         if (pan && !eightDEnabled) pan.pan.value = parseFloat(document.getElementById('panSlider').value) / 100;
         const gainN  = offCtx.createGain(); gainN.gain.value = parseFloat(document.getElementById('volumeSlider').value) / 100;
 
-        const echoV = parseFloat(document.getElementById('echoSlider').value) / 100;
         const delay = offCtx.createDelay(5.0); delay.delayTime.value = 0.3;
         const delayFeedback = offCtx.createGain(); delayFeedback.gain.value = Math.min(0.55, echoV * 0.5);
         const echoWet = offCtx.createGain(); echoWet.gain.value = echoV;
@@ -838,7 +1044,6 @@ async function handleDownload() {
         const conv   = offCtx.createConvolver();
         const rDry   = offCtx.createGain();
         const rWet   = offCtx.createGain();
-        const revV   = parseFloat(document.getElementById('reverbSlider').value) / 100;
         rDry.gain.value = 1 - revV; rWet.gain.value = revV * 0.6;
         const rLen   = sr * 2;
         const rImp   = offCtx.createBuffer(2, rLen, sr);
@@ -885,24 +1090,104 @@ async function handleDownload() {
             }
         }
 
-        const wav  = audioBufferToWav(rendered);
-        const blob2 = new Blob([wav], { type: 'audio/wav' });
-        const url  = URL.createObjectURL(blob2);
-        const a    = document.createElement('a');
-        a.href     = url;
         const fx = [];
         if (speed !== 1.0) fx.push(speed + 'x');
-        if (pitch !== 0)   fx.push((pitch > 0 ? '+' : '') + pitch + 'st');
-        if (parseFloat(document.getElementById('echoSlider').value) > 0) fx.push('echo');
-        a.download = 'edited_' + currentFileName.replace(/\.[^/.]+$/, '') + (fx.length ? '_' + fx.join('_') : '') + '.wav';
-        a.click(); URL.revokeObjectURL(url);
+        if (pitch !== 0) fx.push((pitch > 0 ? '+' : '') + pitch + 'st');
+        if (revV > 0) fx.push('reverb');
+        if (echoV > 0) fx.push('echo');
+
+        let outputBlob;
+        let extension;
+        if (exportFormat.startsWith('mp3-')) {
+            const bitrate = parseInt(exportFormat.split('-')[1], 10) || 320;
+            downloadBtn.querySelector('span').textContent = 'Preparing MP3...';
+            const mp3Buffer = await resampleAudioBuffer(rendered, 44100);
+            outputBlob = await audioBufferToMp3(mp3Buffer, bitrate);
+            extension = 'mp3';
+        } else {
+            outputBlob = new Blob([audioBufferToWav(rendered)], { type: 'audio/wav' });
+            extension = 'wav';
+        }
+
+        const baseName = currentFileName.replace(/\.[^/.]+$/, '');
+        const fileName = 'edited_' + baseName + (fx.length ? '_' + fx.join('_') : '') + '.' + extension;
+        downloadBlob(outputBlob, fileName);
     } catch(err) {
         console.error('Erro de export:', err);
         alert('Falha ao exportar: ' + err.message);
     } finally {
         downloadBtn.querySelector('span').textContent = 'Export';
         downloadBtn.disabled = false;
+        if (formatSelect) formatSelect.disabled = false;
     }
+}
+
+function downloadBlob(blob, fileName) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+async function resampleAudioBuffer(buffer, targetSampleRate) {
+    if (buffer.sampleRate === targetSampleRate) return buffer;
+    const OfflineContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OfflineContext) throw new Error('Este navegador não oferece o recurso necessário para exportar MP3.');
+
+    const frameCount = Math.ceil(buffer.duration * targetSampleRate);
+    const context = new OfflineContext(Math.min(2, buffer.numberOfChannels), frameCount, targetSampleRate);
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    source.start(0);
+    return context.startRendering();
+}
+
+function floatToInt16(floatData) {
+    const pcm = new Int16Array(floatData.length);
+    for (let i = 0; i < floatData.length; i++) {
+        const sample = Math.max(-1, Math.min(1, floatData[i]));
+        pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    }
+    return pcm;
+}
+
+async function audioBufferToMp3(buffer, bitrate) {
+    if (!window.lamejs || !window.lamejs.Mp3Encoder) {
+        throw new Error('O codificador MP3 não foi carregado. Verifique sua conexão e tente novamente.');
+    }
+
+    const channels = Math.min(2, buffer.numberOfChannels);
+    const encoder = new window.lamejs.Mp3Encoder(channels, buffer.sampleRate, bitrate);
+    const left = floatToInt16(buffer.getChannelData(0));
+    const right = channels > 1 ? floatToInt16(buffer.getChannelData(1)) : left;
+    const blockSize = 1152;
+    const mp3Chunks = [];
+    const totalBlocks = Math.ceil(left.length / blockSize);
+
+    for (let offset = 0, block = 0; offset < left.length; offset += blockSize, block++) {
+        const leftChunk = left.subarray(offset, Math.min(offset + blockSize, left.length));
+        const rightChunk = right.subarray(offset, Math.min(offset + blockSize, right.length));
+        const encoded = channels > 1
+            ? encoder.encodeBuffer(leftChunk, rightChunk)
+            : encoder.encodeBuffer(leftChunk);
+        if (encoded.length) mp3Chunks.push(new Uint8Array(encoded));
+
+        if (block % 48 === 0) {
+            const progress = Math.min(99, Math.round((block / Math.max(1, totalBlocks)) * 100));
+            downloadBtn.querySelector('span').textContent = 'MP3 ' + progress + '%';
+            await new Promise(resolve => requestAnimationFrame(resolve));
+        }
+    }
+
+    const flushed = encoder.flush();
+    if (flushed.length) mp3Chunks.push(new Uint8Array(flushed));
+    return new Blob(mp3Chunks, { type: 'audio/mpeg' });
 }
 
 // ── WAV Encoder
