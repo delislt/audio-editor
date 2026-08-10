@@ -7,6 +7,8 @@ let audioContext;
 let audioBuffer;
 let tonePlayer;
 let tonePitchShift;
+let tonePitchDry;
+let tonePitchWet;
 let toneGain;
 let toneBass;
 let toneTreble;
@@ -47,6 +49,7 @@ let progressBar, progressFill, progressThumb, currentTimeEl, totalTimeEl;
 let fileNameEl, waveformCanvas, waveformCtx, playIcon, pauseIcon;
 let pitchProcessingBanner, pitchProcessingInline, eightDToggle;
 let activePresetNameEl, presetToast, presetToastNameEl;
+let presetsSection, presetToggle, presetPanel, presetToggleLabel;
 
 function initDOM() {
     if (window.lucide) window.lucide.createIcons();
@@ -72,6 +75,10 @@ function initDOM() {
     activePresetNameEl  = document.getElementById('activePresetName');
     presetToast         = document.getElementById('presetToast');
     presetToastNameEl   = document.getElementById('presetToastName');
+    presetsSection       = document.getElementById('presetsSection');
+    presetToggle         = document.getElementById('presetToggle');
+    presetPanel          = document.getElementById('presetPanel');
+    presetToggleLabel    = document.getElementById('presetToggleLabel');
 
     resizeWaveformCanvas();
     drawVisualizerIdle();
@@ -109,6 +116,25 @@ function setPlaybackSpeed(speed) {
     if (isPlaying) playStarted = Tone.now();
 
     syncProgressUI(currentOffset);
+}
+
+function setRealtimePitch(semitones, immediate = false) {
+    const pitch = Number.isFinite(semitones) ? semitones : 0;
+    if (tonePitchShift) tonePitchShift.pitch = pitch;
+    if (!tonePitchDry || !tonePitchWet) return;
+
+    const neutralPitch = Math.abs(pitch) < 0.01;
+    const dryLevel = neutralPitch ? 1 : 0;
+    const wetLevel = neutralPitch ? 0 : 1;
+
+    if (immediate) {
+        tonePitchDry.gain.value = dryLevel;
+        tonePitchWet.gain.value = wetLevel;
+        return;
+    }
+
+    tonePitchDry.gain.rampTo(dryLevel, 0.04);
+    tonePitchWet.gain.rampTo(wetLevel, 0.04);
 }
 
 // ── Tone.js Graph
@@ -167,12 +193,19 @@ async function buildToneGraph() {
     tonePlayer = new Tone.Player(audioBuffer);
     tonePlayer.loop = false;
 
+    const initialPitch = getPitchSemitones();
     tonePitchShift = new Tone.PitchShift({
-        pitch: getPitchSemitones(),
+        pitch: initialPitch,
         windowSize: 0.1,
         delayTime: 0,
         feedback: 0
     });
+
+    // PitchShift still uses its phase-vocoder at 0 semitones. A real dry path
+    // restores the original signal when the control returns to neutral.
+    const neutralPitch = Math.abs(initialPitch) < 0.01;
+    tonePitchDry = new Tone.Gain(neutralPitch ? 1 : 0);
+    tonePitchWet = new Tone.Gain(neutralPitch ? 0 : 1);
 
     const bassVal   = parseFloat(document.getElementById('bassSlider').value);
     const trebleVal = parseFloat(document.getElementById('trebleSlider').value);
@@ -207,8 +240,11 @@ async function buildToneGraph() {
         analyserNode.smoothingTimeConstant = 0.8;
     }
 
+    tonePlayer.connect(tonePitchDry);
+    tonePitchDry.connect(toneBass);
     tonePlayer.connect(tonePitchShift);
-    tonePitchShift.connect(toneBass);
+    tonePitchShift.connect(tonePitchWet);
+    tonePitchWet.connect(toneBass);
     toneBass.connect(toneTreble);
     toneTreble.connect(tonePan);
     tonePan.connect(toneGain);
@@ -225,6 +261,8 @@ async function buildToneGraph() {
 function teardownToneGraph() {
     try { if (tonePlayer)     { tonePlayer.onstop = () => {}; tonePlayer.stop(); tonePlayer.dispose(); } } catch(e){}
     try { if (tonePitchShift) { tonePitchShift.dispose(); }                    } catch(e){}
+    try { if (tonePitchDry)   { tonePitchDry.dispose(); }                      } catch(e){}
+    try { if (tonePitchWet)   { tonePitchWet.dispose(); }                      } catch(e){}
     try { if (toneBass)       { toneBass.dispose(); }                          } catch(e){}
     try { if (toneTreble)     { toneTreble.dispose(); }                        } catch(e){}
     try { if (tonePan)        { tonePan.dispose(); }                           } catch(e){}
@@ -232,8 +270,9 @@ function teardownToneGraph() {
     try { if (toneDelay)      { toneDelay.dispose(); }                         } catch(e){}
     try { if (toneReverb)     { toneReverb.dispose(); }                        } catch(e){}
     try { if (toneCompressor) { toneCompressor.dispose(); }                    } catch(e){}
-    tonePlayer = tonePitchShift = toneBass = toneTreble = tonePan = null;
-    toneGain = toneDelay = toneReverb = toneCompressor = null;
+    tonePlayer = tonePitchShift = tonePitchDry = tonePitchWet = null;
+    toneBass = toneTreble = tonePan = toneGain = null;
+    toneDelay = toneReverb = toneCompressor = null;
 }
 
 // ── Upload
@@ -492,7 +531,7 @@ async function play() {
     const speed = getSpeedValue();
     tonePlayer.playbackRate = speed;
     playbackRateAtStart = speed;
-    if (tonePitchShift) tonePitchShift.pitch = getPitchSemitones();
+    setRealtimePitch(getPitchSemitones(), true);
 
     const maxOffset = Math.max(0, getDuration() - 0.01);
     const offset = Math.max(0, Math.min(pauseOffset, maxOffset));
@@ -610,7 +649,7 @@ function attachListeners() {
     document.getElementById('pitchSlider').addEventListener('input', e => {
         const v = parseFloat(e.target.value);
         document.getElementById('pitchValue').textContent = v.toFixed(1) + ' st';
-        if (tonePitchShift) tonePitchShift.pitch = v;
+        setRealtimePitch(v);
     });
 
     document.getElementById('volumeSlider').addEventListener('input', e => {
@@ -691,6 +730,12 @@ function attachListeners() {
     document.querySelectorAll('.preset-filter').forEach(filterBtn => {
         filterBtn.addEventListener('click', () => filterPresets(filterBtn.dataset.filter));
     });
+
+    if (presetToggle) {
+        presetToggle.addEventListener('click', () => {
+            setPresetsExpanded(presetToggle.getAttribute('aria-expanded') !== 'true');
+        });
+    }
 
     initializeInteractiveDesign();
 
@@ -780,9 +825,7 @@ function drawVisualizerBackdrop(width, height, colors) {
 
 function setVisualizerLive(live) {
     const container = document.getElementById('visualizerContainer');
-    const label = document.getElementById('visualizerMode');
     if (container) container.classList.toggle('is-live', live);
-    if (label) label.textContent = live ? 'LIVE SPECTRUM' : 'TRACK WAVEFORM';
 }
 
 function drawVisualizerIdle() {
@@ -1071,6 +1114,15 @@ function setActivePreset(presetName, preset) {
     });
 }
 
+function setPresetsExpanded(expanded) {
+    if (!presetsSection || !presetToggle || !presetPanel) return;
+    presetsSection.classList.toggle('presets-open', expanded);
+    presetToggle.setAttribute('aria-expanded', String(expanded));
+    presetPanel.setAttribute('aria-hidden', String(!expanded));
+    presetPanel.toggleAttribute('inert', !expanded);
+    if (presetToggleLabel) presetToggleLabel.textContent = expanded ? 'Hide presets' : 'Show presets';
+}
+
 function filterPresets(filterName) {
     document.querySelectorAll('.preset-filter').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.filter === filterName);
@@ -1110,7 +1162,7 @@ function applyPreset(preset, presetName = 'normal') {
         toneDelay.feedback.value = Math.min(0.55, preset.echo / 100 * 0.5);
     }
     if (toneReverb)     toneReverb.wet.value         = preset.reverb / 100;
-    if (tonePitchShift) tonePitchShift.pitch         = preset.pitch;
+    setRealtimePitch(preset.pitch);
 
     if (preset.eightD && !eightDEnabled)      eightDToggle.click();
     else if (!preset.eightD && eightDEnabled) eightDToggle.click();
