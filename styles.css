@@ -1203,30 +1203,49 @@ body::before {
 .orbit {
   position: absolute;
   border-radius: 50%;
-  border: 1px solid rgba(167,139,250,.2);
-  transform: rotateX(66deg) rotateZ(-14deg);
+  border: 1px solid rgba(167,139,250,.24);
+  transform-origin: 50% 50%;
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
-.orbit-one { width: 340px; height: 340px; animation: orbitSpin 15s linear infinite; }
+.orbit-one {
+  width: 340px;
+  height: 340px;
+  animation: orbitSpinOne 14s linear infinite;
+}
 .orbit-two {
   width: 240px;
   height: 240px;
-  border-color: rgba(34,211,238,.22);
-  animation: orbitSpinReverse 10s linear infinite;
+  border-color: rgba(34,211,238,.25);
+  animation: orbitSpinTwo 10s linear infinite;
 }
 .orbit::after {
   content: '';
   position: absolute;
-  width: 9px;
-  height: 9px;
-  top: 14%;
-  left: 16%;
+  width: 10px;
+  height: 10px;
+  top: 50%;
+  right: -5px;
+  margin-top: -5px;
   border-radius: 50%;
   background: var(--accent2);
-  box-shadow: 0 0 18px var(--accent2);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent2) 13%, transparent), 0 0 22px var(--accent2);
 }
-.orbit-two::after { background: var(--accent3); box-shadow: 0 0 18px var(--accent3); }
-@keyframes orbitSpin { to { transform: rotateX(66deg) rotateZ(346deg); } }
-@keyframes orbitSpinReverse { to { transform: rotateX(66deg) rotateZ(-374deg); } }
+.orbit-one::after { transform: scaleY(2.38); }
+.orbit-two::after {
+  transform: scaleY(1.82);
+  background: var(--accent3);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent3) 13%, transparent), 0 0 22px var(--accent3);
+}
+@keyframes orbitSpinOne {
+  from { transform: rotate(-14deg) scaleY(.42) rotate(0deg); }
+  to { transform: rotate(-14deg) scaleY(.42) rotate(360deg); }
+}
+@keyframes orbitSpinTwo {
+  from { transform: rotate(18deg) scaleY(.55) rotate(360deg); }
+  to { transform: rotate(18deg) scaleY(.55) rotate(0deg); }
+}
 
 .spectrum {
   height: 176px;
@@ -1599,15 +1618,24 @@ body::after {
   border: 1px solid var(--surface-border);
   border-radius: 999px;
   background: rgba(255,255,255,.025);
-  mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent);
+  mask-image: none;
+  -webkit-mask-image: none;
 }
 .signal-track {
   width: max-content;
   display: flex;
   align-items: center;
-  gap: 22px;
+  gap: 0;
   padding: 10px 0;
+  will-change: transform;
   animation: signalMarquee 24s linear infinite;
+}
+.signal-set {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding-right: 22px;
 }
 .signal-track span {
   color: var(--text-faint);
@@ -1622,7 +1650,10 @@ body::after {
   background: var(--vibe-secondary);
   box-shadow: 0 0 12px var(--vibe-secondary);
 }
-@keyframes signalMarquee { to { transform: translateX(-50%); } }
+@keyframes signalMarquee {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-50%, 0, 0); }
+}
 
 .hero h1 span,
 .sound-core,
@@ -2041,3 +2072,12 @@ input[type="range"]::-webkit-slider-track { background: transparent; }
   .waveform-container.is-live .visualizer-mode svg { animation: none; }
 }
 
+/* Mobile Safari orbit fallback. Uses only 2D transforms for reliable animation. */
+@media (max-width: 600px) {
+  .orbit-one { animation: orbitSpinOne 14s linear infinite; }
+  .orbit-two { animation: orbitSpinTwo 10s linear infinite; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit-one { animation: orbitSpinOne 30s linear infinite !important; }
+  .orbit-two { animation: orbitSpinTwo 24s linear infinite !important; }
+}
