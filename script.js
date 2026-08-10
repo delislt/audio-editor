@@ -37,6 +37,7 @@ let pointerRafId = null;
 let lastPointerX = 50;
 let lastPointerY = 30;
 let isApplyingPreset = false;
+let isLoadingAudio = false;
 
 // DOM (aguarda DOMContentLoaded para garantir que os elementos existem)
 document.addEventListener('DOMContentLoaded', initDOM);
@@ -113,8 +114,8 @@ function setPlaybackSpeed(speed) {
 // ── Tone.js Graph
 async function buildToneGraph() {
     teardownToneGraph();
-    if (!window.Tone) throw new Error('O processador de áudio não foi carregado. Verifique sua conexão e recarregue a página.');
-    if (!audioBuffer) throw new Error('Nenhum áudio foi carregado.');
+    if (!window.Tone) throw new Error('The audio engine could not be loaded. Check your connection and reload the page.');
+    if (!audioBuffer) throw new Error('No audio file has been loaded.');
     await Tone.start();
 
     // O arquivo já foi decodificado pelo AudioContext nativo no upload.
@@ -230,47 +231,99 @@ function attachUploadListeners() {
     });
 }
 
+function withTimeout(promise, timeoutMs, message) {
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+function decodeAudioDataCompat(context, arrayBuffer) {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const succeed = buffer => {
+            if (settled) return;
+            settled = true;
+            resolve(buffer);
+        };
+        const fail = error => {
+            if (settled) return;
+            settled = true;
+            reject(error || new Error('The browser could not decode this audio file.'));
+        };
+
+        try {
+            const result = context.decodeAudioData(arrayBuffer.slice(0), succeed, fail);
+            if (result && typeof result.then === 'function') result.then(succeed, fail);
+        } catch (error) {
+            fail(error);
+        }
+    });
+}
+
 async function loadAudioFile(file) {
+    if (isLoadingAudio) return;
+
     const chooseFileBtn = document.getElementById('chooseFileBtn');
     const originalButtonContent = chooseFileBtn.innerHTML;
     const validExtension = file && /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(file.name);
     if (!file || (!(file.type || '').startsWith('audio/') && !validExtension)) {
-        alert('Selecione um arquivo de áudio válido (MP3, WAV, OGG, M4A, AAC ou FLAC).');
+        alert('Choose a valid audio file: MP3, WAV, OGG, M4A, AAC, or FLAC.');
         return;
     }
 
+    isLoadingAudio = true;
     try {
-        chooseFileBtn.textContent = 'Carregando…';
+        chooseFileBtn.textContent = 'Reading file...';
         uploadSection.setAttribute('aria-busy', 'true');
         uploadSection.setAttribute('aria-disabled', 'true');
-        isPlaying = false; pauseOffset = 0; playbackRateAtStart = getSpeedValue();
+        isPlaying = false;
+        pauseOffset = 0;
+        playbackRateAtStart = getSpeedValue();
         teardownToneGraph();
         stopLevelMeter();
         cancelAnimationFrame(progressRafId);
         cancelAnimationFrame(animationId);
 
-        const fileData = await file.arrayBuffer();
+        const fileData = await withTimeout(
+            Promise.resolve().then(() => file.arrayBuffer()),
+            90000,
+            'Reading this file took too long. If it is stored in the cloud, download it to the device and try again.'
+        );
 
-        // Decodifica uma única vez. O mesmo AudioBuffer é usado para waveform,
-        // exportação e reprodução pelo Tone.Player.
-        if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        if (audioContext.state === 'suspended') await audioContext.resume();
-        const decodedBuffer = await audioContext.decodeAudioData(fileData.slice(0));
+        chooseFileBtn.textContent = 'Decoding...';
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) throw new Error('This browser does not support audio decoding.');
+        if (!audioContext || audioContext.state === 'closed') audioContext = new AudioContextClass();
+
+        // Decoding does not require the AudioContext to be resumed. Waiting for
+        // resume() here can stall on mobile Safari after the file picker closes.
+        const decodedBuffer = await withTimeout(
+            decodeAudioDataCompat(audioContext, fileData),
+            60000,
+            'Audio decoding timed out. Try converting the file to MP3 or WAV.'
+        );
+
         audioBuffer = decodedBuffer;
         currentFileName = file.name;
         if (fileNameEl) fileNameEl.textContent = currentFileName;
 
         document.querySelectorAll('.player-section').forEach(el => el.classList.add('active'));
+        chooseFileBtn.textContent = 'Building waveform...';
+        await new Promise(resolve => requestAnimationFrame(resolve));
         drawWaveform();
         showPlayIcon();
         syncProgressUI(0);
         if (totalTimeEl) totalTimeEl.textContent = formatTime(getAdjustedDuration());
-        console.log('✅ Áudio carregado:', file.name);
-    } catch(err) {
-        console.error('Erro ao carregar áudio:', err);
+        console.log('Audio loaded:', file.name);
+    } catch (error) {
+        console.error('Audio loading error:', error);
         audioBuffer = null;
-        alert('Não foi possível decodificar este arquivo. Tente outro formato ou arquivo.\n\nDetalhes: ' + err.message);
+        const details = error && error.message ? error.message : 'Unknown decoding error.';
+        alert('This audio file could not be opened. Try MP3 or WAV.\n\nDetails: ' + details);
     } finally {
+        isLoadingAudio = false;
         chooseFileBtn.innerHTML = originalButtonContent;
         uploadSection.removeAttribute('aria-busy');
         uploadSection.removeAttribute('aria-disabled');
@@ -283,11 +336,11 @@ async function play() {
     if (!audioBuffer) return;
     if (isPlaying) { pause(); return; }
     try {
-        if (!window.Tone) throw new Error('O processador de áudio não foi carregado. Verifique sua conexão e recarregue a página.');
+        if (!window.Tone) throw new Error('The audio engine could not be loaded. Check your connection and reload the page.');
         await Tone.start();
         if (!tonePlayer) await buildToneGraph();
     } catch (err) {
-        console.error('Erro ao iniciar reprodução:', err);
+        console.error('Playback error:', err);
         alert(err.message);
         return;
     }
@@ -636,7 +689,8 @@ function drawWaveform() {
         let max = -1;
         const start = i * step;
         const end = Math.min(data.length, start + step);
-        for (let j = start; j < end; j++) {
+        const sampleStride = Math.max(1, Math.floor(step / 256));
+        for (let j = start; j < end; j += sampleStride) {
             const sample = data[j];
             if (sample < min) min = sample;
             if (sample > max) max = sample;
@@ -968,7 +1022,7 @@ function initializeInteractiveDesign() {
 
 // ── Export / Download
 async function handleDownload() {
-    if (!audioBuffer) { alert('Carregue um arquivo de áudio primeiro.'); return; }
+    if (!audioBuffer) { alert('Load an audio file first.'); return; }
 
     const formatSelect = document.getElementById('exportFormat');
     const exportFormat = formatSelect ? formatSelect.value : 'wav';
@@ -1113,8 +1167,8 @@ async function handleDownload() {
         const fileName = 'edited_' + baseName + (fx.length ? '_' + fx.join('_') : '') + '.' + extension;
         downloadBlob(outputBlob, fileName);
     } catch(err) {
-        console.error('Erro de export:', err);
-        alert('Falha ao exportar: ' + err.message);
+        console.error('Export error:', err);
+        alert('Export failed: ' + err.message);
     } finally {
         downloadBtn.querySelector('span').textContent = 'Export';
         downloadBtn.disabled = false;
@@ -1137,7 +1191,7 @@ function downloadBlob(blob, fileName) {
 async function resampleAudioBuffer(buffer, targetSampleRate) {
     if (buffer.sampleRate === targetSampleRate) return buffer;
     const OfflineContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    if (!OfflineContext) throw new Error('Este navegador não oferece o recurso necessário para exportar MP3.');
+    if (!OfflineContext) throw new Error('This browser does not support the feature required for MP3 export.');
 
     const frameCount = Math.ceil(buffer.duration * targetSampleRate);
     const context = new OfflineContext(Math.min(2, buffer.numberOfChannels), frameCount, targetSampleRate);
@@ -1159,7 +1213,7 @@ function floatToInt16(floatData) {
 
 async function audioBufferToMp3(buffer, bitrate) {
     if (!window.lamejs || !window.lamejs.Mp3Encoder) {
-        throw new Error('O codificador MP3 não foi carregado. Verifique sua conexão e tente novamente.');
+        throw new Error('The MP3 encoder could not be loaded. Check your connection and try again.');
     }
 
     const channels = Math.min(2, buffer.numberOfChannels);
@@ -1278,4 +1332,4 @@ function formatTime(s) {
 function gainToDb(g)  { return 20 * Math.log10(Math.max(g, 0.00001)); }
 function dbToGain(db) { return Math.pow(10, db / 20); }
 
-console.log('🎵 Audio Editor — Tone.js PitchShift (phase vocoder real) ✅');
+console.log('🎵 Audio Editor — Tone.js PitchShift (real phase vocoder) ✅');
