@@ -26,7 +26,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
   <link rel="manifest" href="site.webmanifest">
 
-  <link rel="stylesheet" href="styles.css?v=20260810-4">
+  <link rel="stylesheet" href="styles.css?v=20260810-5">
 
 </head>
 <body>
@@ -190,14 +190,35 @@
         <i data-lucide="refresh-ccw"></i>
       </button>
       <div class="export-group">
-        <label class="export-format" for="exportFormat">
-          <span>FORMAT</span>
-          <select id="exportFormat" aria-label="Export audio format">
-            <option value="wav">WAV • Lossless</option>
-            <option value="mp3-320">MP3 • 320 kbps</option>
-            <option value="mp3-192">MP3 • 192 kbps</option>
-          </select>
-        </label>
+        <div class="export-format" role="radiogroup" aria-label="Export audio format">
+          <div class="format-picker-heading">
+            <i data-lucide="file-music"></i>
+            <span>Export format</span>
+          </div>
+          <div class="format-options">
+            <label class="format-option">
+              <input type="radio" name="exportFormat" value="wav" checked>
+              <span class="format-option-surface">
+                <span class="format-copy"><strong>WAV</strong><small>Lossless</small></span>
+                <span class="format-check"><i data-lucide="check"></i></span>
+              </span>
+            </label>
+            <label class="format-option">
+              <input type="radio" name="exportFormat" value="mp3-320">
+              <span class="format-option-surface">
+                <span class="format-copy"><strong>MP3</strong><small>320 kbps</small></span>
+                <span class="format-check"><i data-lucide="check"></i></span>
+              </span>
+            </label>
+            <label class="format-option">
+              <input type="radio" name="exportFormat" value="mp3-192">
+              <span class="format-option-surface">
+                <span class="format-copy"><strong>MP3</strong><small>192 kbps</small></span>
+                <span class="format-check"><i data-lucide="check"></i></span>
+              </span>
+            </label>
+          </div>
+        </div>
         <button class="download-btn glass-btn" id="downloadBtn" aria-label="Export audio">
           <i data-lucide="download"></i>
           <span>Export</span>
@@ -404,6 +425,6 @@
   charset="UTF-8"
   integrity="sha384-tciqShB7iuowinoNxgDdys4blXjmhgoOs2OuG0oXoxPlQtuAqPnaFiZy5w17NvVT"
   crossorigin="anonymous"></script>
-<script src="script.js?v=20260810-6"></script>
+<script src="script.js?v=20260810-7"></script>
 </body>
 </html>
