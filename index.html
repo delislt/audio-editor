@@ -26,7 +26,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
   <link rel="manifest" href="site.webmanifest">
 
-  <link rel="stylesheet" href="styles.css?v=20260810-3">
+  <link rel="stylesheet" href="styles.css?v=20260810-4">
 
 </head>
 <body>
@@ -71,7 +71,6 @@
         </div>
       </div>
       <div class="header-actions">
-        <div class="privacy-chip"><span class="status-dot"></span>Local processing</div>
         <button class="theme-toggle glass-btn icon-btn" data-theme-toggle aria-label="Switch to light mode">
           <i data-lucide="moon"></i>
         </button>
@@ -130,17 +129,6 @@
     </div>
   </section>
 
-  <div class="signal-ticker" aria-hidden="true">
-    <div class="signal-track">
-      <div class="signal-set">
-        <span>REAL-TIME ENGINE</span><i></i><span>LOCAL PROCESSING</span><i></i><span>22 SONIC WORLDS</span><i></i><span>WAV + MP3 EXPORT</span><i></i>
-      </div>
-      <div class="signal-set">
-        <span>REAL-TIME ENGINE</span><i></i><span>LOCAL PROCESSING</span><i></i><span>22 SONIC WORLDS</span><i></i><span>WAV + MP3 EXPORT</span><i></i>
-      </div>
-    </div>
-  </div>
-
   <!-- Upload Section -->
   <input class="file-input-native" type="file" id="fileInput" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/ogg,audio/x-m4a,audio/m4a,audio/aac,audio/flac,audio/x-flac,audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac" tabindex="-1">
 
@@ -168,13 +156,11 @@
         <span class="file-context">NOW PLAYING</span>
         <span class="file-name" id="fileName">&mdash;</span>
       </div>
-      <div class="engine-status"><span></span>LIVE ENGINE</div>
     </div>
 
     <div class="waveform-container" id="visualizerContainer">
       <canvas id="waveform" aria-label="Audio waveform and live frequency spectrum"></canvas>
       <div class="visualizer-chrome" aria-hidden="true">
-        <span class="visualizer-mode"><i data-lucide="audio-waveform"></i><b id="visualizerMode">TRACK WAVEFORM</b></span>
         <span class="visualizer-bands">LOW&nbsp;&nbsp;•&nbsp;&nbsp;MID&nbsp;&nbsp;•&nbsp;&nbsp;HIGH</span>
       </div>
     </div>
@@ -221,7 +207,7 @@
   </div>
 
   <!-- Presets Section -->
-  <div class="presets-section glass-card player-section">
+  <div class="presets-section glass-card player-section" id="presetsSection">
     <div class="preset-toolbar">
       <div class="section-header section-header-rich">
         <div>
@@ -230,22 +216,30 @@
         </div>
         <i data-lucide="sparkles"></i>
       </div>
-      <div class="preset-status">
-        <span>ACTIVE PRESET</span>
-        <strong id="activePresetName">Normal</strong>
-        <i></i>
+      <div class="preset-toolbar-actions">
+        <div class="preset-status">
+          <span>ACTIVE PRESET</span>
+          <strong id="activePresetName">Normal</strong>
+          <i></i>
+        </div>
+        <button class="preset-toggle glass-btn" id="presetToggle" type="button" aria-expanded="false" aria-controls="presetPanel">
+          <span id="presetToggleLabel">Show presets</span>
+          <i data-lucide="chevron-down"></i>
+        </button>
       </div>
     </div>
 
-    <div class="preset-filters" role="group" aria-label="Filter presets">
+    <div class="preset-panel" id="presetPanel" aria-hidden="true" inert>
+      <div class="preset-panel-inner">
+        <div class="preset-filters" role="group" aria-label="Filter presets">
       <button class="preset-filter active" type="button" data-filter="all">All</button>
       <button class="preset-filter" type="button" data-filter="character">Character</button>
       <button class="preset-filter" type="button" data-filter="space">Spatial</button>
       <button class="preset-filter" type="button" data-filter="extreme">Extreme</button>
-      <button class="preset-filter" type="button" data-filter="slowed">Slowed</button>
-    </div>
+          <button class="preset-filter" type="button" data-filter="slowed">Slowed</button>
+        </div>
 
-    <div class="presets-grid">
+        <div class="presets-grid">
       <button class="preset-btn active" data-code="01" data-category="essential" data-preset="normal" aria-pressed="true"><i data-lucide="circle-dot"></i><span>Normal</span><small>Clean reference</small></button>
       <button class="preset-btn" data-code="02" data-category="extreme" data-preset="nightcore" aria-pressed="false"><i data-lucide="zap"></i><span>Nightcore</span><small>Fast + bright</small></button>
       <button class="preset-btn" data-code="03" data-category="character" data-preset="deepbass" aria-pressed="false"><i data-lucide="waves"></i><span>Deep Bass</span><small>Heavy low end</small></button>
@@ -267,7 +261,9 @@
       <button class="preset-btn" data-code="19" data-category="slowed" data-preset="slowedreverb" aria-pressed="false"><i data-lucide="cloud-moon"></i><span>Slowed + Reverb</span><small>0.85x • balanced space</small></button>
       <button class="preset-btn" data-code="20" data-category="slowed" data-preset="softslowed" aria-pressed="false"><i data-lucide="feather"></i><span>Soft Slowed</span><small>0.92x • light reverb</small></button>
       <button class="preset-btn" data-code="21" data-category="slowed" data-preset="deepslowed" aria-pressed="false"><i data-lucide="moon"></i><span>Deep Slowed</span><small>0.75x • deep reverb</small></button>
-      <button class="preset-btn" data-code="22" data-category="slowed" data-preset="ultraslowed" aria-pressed="false"><i data-lucide="cloud-fog"></i><span>Ultra Slowed</span><small>0.65x • huge reverb</small></button>
+          <button class="preset-btn" data-code="22" data-category="slowed" data-preset="ultraslowed" aria-pressed="false"><i data-lucide="cloud-fog"></i><span>Ultra Slowed</span><small>0.65x • huge reverb</small></button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -408,6 +404,6 @@
   charset="UTF-8"
   integrity="sha384-tciqShB7iuowinoNxgDdys4blXjmhgoOs2OuG0oXoxPlQtuAqPnaFiZy5w17NvVT"
   crossorigin="anonymous"></script>
-<script src="script.js?v=20260810-5"></script>
+<script src="script.js?v=20260810-6"></script>
 </body>
 </html>
