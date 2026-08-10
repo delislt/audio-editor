@@ -11,6 +11,7 @@ let toneGain;
 let toneBass;
 let toneTreble;
 let tonePan;
+let toneDelay;
 let toneReverb;
 let toneCompressor;
 let analyserNode;
@@ -141,6 +142,13 @@ async function buildToneGraph() {
     const volVal = parseFloat(document.getElementById('volumeSlider').value) / 100;
     toneGain = new Tone.Gain(volVal);
 
+    const echoVal = parseFloat(document.getElementById('echoSlider').value) / 100;
+    toneDelay = new Tone.FeedbackDelay({
+        delayTime: 0.3,
+        feedback: Math.min(0.55, echoVal * 0.5),
+        wet: echoVal
+    });
+
     const revVal = parseFloat(document.getElementById('reverbSlider').value) / 100;
     toneReverb = new Tone.Reverb({ decay: 2.0, wet: revVal });
     await toneReverb.ready;
@@ -160,7 +168,8 @@ async function buildToneGraph() {
     toneBass.connect(toneTreble);
     toneTreble.connect(tonePan);
     tonePan.connect(toneGain);
-    toneGain.connect(toneReverb);
+    toneGain.connect(toneDelay);
+    toneDelay.connect(toneReverb);
     toneReverb.connect(toneCompressor);
 
     // Mantém o caminho audível inteiramente no grafo do Tone.js.
@@ -176,28 +185,32 @@ function teardownToneGraph() {
     try { if (toneTreble)     { toneTreble.dispose(); }                        } catch(e){}
     try { if (tonePan)        { tonePan.dispose(); }                           } catch(e){}
     try { if (toneGain)       { toneGain.dispose(); }                          } catch(e){}
+    try { if (toneDelay)      { toneDelay.dispose(); }                         } catch(e){}
     try { if (toneReverb)     { toneReverb.dispose(); }                        } catch(e){}
     try { if (toneCompressor) { toneCompressor.dispose(); }                    } catch(e){}
     tonePlayer = tonePitchShift = toneBass = toneTreble = tonePan = null;
-    toneGain = toneReverb = toneCompressor = null;
+    toneGain = toneDelay = toneReverb = toneCompressor = null;
 }
 
 // ── Upload
 function attachUploadListeners() {
-    if (!fileInput) return;
-    const chooseFileBtn = document.getElementById('chooseFileBtn');
-    const openFilePicker = () => {
+    if (!fileInput || !uploadSection) return;
+
+    const resetFileInput = () => {
+        // Permite selecionar novamente o mesmo arquivo.
         fileInput.value = '';
-        fileInput.click();
     };
 
-    chooseFileBtn.addEventListener('click', e => {
-        e.stopPropagation();
-        openFilePicker();
+    // O uploadSection é um label ligado ao input. Em celulares, essa ativação
+    // nativa é mais confiável do que abrir o seletor apenas com input.click().
+    uploadSection.addEventListener('pointerdown', resetFileInput);
+    uploadSection.addEventListener('keydown', e => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        resetFileInput();
+        fileInput.click();
     });
-    uploadSection.addEventListener('click', e => {
-        if (!chooseFileBtn.contains(e.target)) openFilePicker();
-    });
+
     ['dragenter', 'dragover'].forEach(type => uploadSection.addEventListener(type, e => {
         e.preventDefault();
         uploadSection.classList.add('drag-over');
@@ -212,8 +225,8 @@ function attachUploadListeners() {
         if (file) loadAudioFile(file);
     });
     fileInput.addEventListener('change', e => {
-        const f = e.target.files[0];
-        if (f) loadAudioFile(f);
+        const file = e.target.files && e.target.files[0];
+        if (file) loadAudioFile(file);
     });
 }
 
@@ -227,9 +240,9 @@ async function loadAudioFile(file) {
     }
 
     try {
-        chooseFileBtn.disabled = true;
         chooseFileBtn.textContent = 'Carregando…';
         uploadSection.setAttribute('aria-busy', 'true');
+        uploadSection.setAttribute('aria-disabled', 'true');
         isPlaying = false; pauseOffset = 0; playbackRateAtStart = getSpeedValue();
         teardownToneGraph();
         stopLevelMeter();
@@ -258,9 +271,9 @@ async function loadAudioFile(file) {
         audioBuffer = null;
         alert('Não foi possível decodificar este arquivo. Tente outro formato ou arquivo.\n\nDetalhes: ' + err.message);
     } finally {
-        chooseFileBtn.disabled = false;
         chooseFileBtn.innerHTML = originalButtonContent;
         uploadSection.removeAttribute('aria-busy');
+        uploadSection.removeAttribute('aria-disabled');
         if (window.lucide) window.lucide.createIcons();
     }
 }
@@ -428,6 +441,15 @@ function attachListeners() {
         if (toneReverb) toneReverb.wet.value = v / 100;
     });
 
+    document.getElementById('echoSlider').addEventListener('input', e => {
+        const v = parseFloat(e.target.value);
+        document.getElementById('echoValue').textContent = v.toFixed(1) + '%';
+        if (toneDelay) {
+            toneDelay.wet.value = v / 100;
+            toneDelay.feedback.value = Math.min(0.55, v / 100 * 0.5);
+        }
+    });
+
     // Stubs
     document.getElementById('preGainSlider').addEventListener('input', () => {});
     document.getElementById('outputGainSlider').addEventListener('input', () => {});
@@ -576,24 +598,24 @@ function stopLevelMeter() {
 
 // ── Presets
 const presets = {
-    normal:       { label:'Normal',       speed:1.00, pitch: 0.0, volume:100, bass: 0, treble: 0, pan:  0, reverb: 0,  eightD:false, colors:['#8b5cf6','#22d3ee'] },
-    nightcore:    { label:'Nightcore',    speed:1.30, pitch: 3.0, volume:100, bass: 1, treble: 6, pan:  0, reverb: 8,  eightD:false, colors:['#ff56c7','#22d3ee'] },
-    deepbass:     { label:'Deep Bass',    speed:0.90, pitch:-3.0, volume:110, bass:15, treble:-5,pan:  0, reverb:10,  eightD:false, colors:['#7c3aed','#f43f5e'] },
-    '8daudio':    { label:'8D Orbit',      speed:1.00, pitch: 0.0, volume:100, bass: 3, treble: 2, pan:  0, reverb:24,  eightD:true,  colors:['#06b6d4','#8b5cf6'] },
-    concert:      { label:'Concert Hall',  speed:1.00, pitch: 0.0, volume:103, bass: 7, treble: 4, pan:  0, reverb:58,  eightD:false, colors:['#f59e0b','#ec4899'] },
-    slowcore:     { label:'Slowcore',      speed:0.72, pitch:-2.0, volume:100, bass: 5, treble:-2,pan:  0, reverb:62,  eightD:false, colors:['#6366f1','#94a3b8'] },
-    lofi:         { label:'Lo-Fi',         speed:0.92, pitch:-1.0, volume: 95, bass: 7, treble:-5,pan: -6, reverb:25,  eightD:false, colors:['#f59e0b','#84cc16'] },
-    vaporwave:    { label:'Vaporwave',     speed:0.80, pitch:-4.0, volume:100, bass: 5, treble: 0, pan: 12, reverb:48,  eightD:false, colors:['#ff56c7','#22d3ee'] },
-    phonecall:    { label:'Phone Call',    speed:1.00, pitch: 2.0, volume: 96, bass: 0, treble: 9, pan:  0, reverb: 3,  eightD:false, colors:['#10b981','#facc15'] },
-    underwater:   { label:'Underwater',    speed:0.85, pitch:-5.0, volume:100, bass:10, treble:-9,pan: -8, reverb:78,  eightD:false, colors:['#0284c7','#22d3ee'] },
-    hyperpop:     { label:'Hyperpop',      speed:1.15, pitch: 4.0, volume:104, bass: 4, treble:10, pan:  0, reverb:16,  eightD:false, colors:['#f43f5e','#a855f7'] },
-    cinematic:    { label:'Cinematic',     speed:0.92, pitch:-2.0, volume:105, bass:11, treble: 3, pan:  0, reverb:55,  eightD:false, colors:['#f97316','#7c3aed'] },
-    dreamscape:   { label:'Dreamscape',    speed:0.82, pitch:-3.0, volume: 94, bass: 3, treble: 2, pan: 10, reverb:74,  eightD:false, colors:['#818cf8','#f0abfc'] },
-    cathedral:    { label:'Cathedral',     speed:1.00, pitch: 0.0, volume:100, bass: 2, treble: 5, pan:  0, reverb:92,  eightD:false, colors:['#fbbf24','#a78bfa'] },
-    subterranean: { label:'Subterranean',  speed:0.68, pitch:-7.0, volume:112, bass:20, treble:-10,pan: 0, reverb:18,  eightD:false, colors:['#ef4444','#581c87'] },
-    crystal:      { label:'Crystal',       speed:1.05, pitch: 5.0, volume: 96, bass: 0, treble:13, pan:  6, reverb:34,  eightD:false, colors:['#67e8f9','#c4b5fd'] },
-    alienradio:   { label:'Alien Radio',   speed:1.10, pitch: 7.0, volume: 98, bass: 1, treble:11, pan:-18, reverb:14,  eightD:true,  colors:['#84cc16','#22d3ee'] },
-    tapewarmth:   { label:'Tape Warmth',   speed:0.96, pitch:-0.5, volume: 97, bass: 6, treble:-4,pan: -4, reverb:12,  eightD:false, colors:['#fb923c','#eab308'] }
+    normal:       { label:'Normal',       speed:1.00, pitch: 0.0, volume:100, bass: 0, treble: 0, pan:  0, reverb: 0, echo: 0, eightD:false, colors:['#8b5cf6','#22d3ee'] },
+    nightcore:    { label:'Nightcore',    speed:1.30, pitch: 3.0, volume:100, bass: 1, treble: 6, pan:  0, reverb: 8, echo: 0, eightD:false, colors:['#ff56c7','#22d3ee'] },
+    deepbass:     { label:'Deep Bass',    speed:0.90, pitch:-3.0, volume:110, bass:15, treble:-5,pan:  0, reverb:10, echo: 5, eightD:false, colors:['#7c3aed','#f43f5e'] },
+    '8daudio':    { label:'8D Orbit',      speed:1.00, pitch: 0.0, volume:100, bass: 3, treble: 2, pan:  0, reverb:24, echo:15, eightD:true,  colors:['#06b6d4','#8b5cf6'] },
+    concert:      { label:'Concert Hall',  speed:1.00, pitch: 0.0, volume:103, bass: 7, treble: 4, pan:  0, reverb:58, echo:20, eightD:false, colors:['#f59e0b','#ec4899'] },
+    slowcore:     { label:'Slowcore',      speed:0.72, pitch:-2.0, volume:100, bass: 5, treble:-2,pan:  0, reverb:62, echo:12, eightD:false, colors:['#6366f1','#94a3b8'] },
+    lofi:         { label:'Lo-Fi',         speed:0.92, pitch:-1.0, volume: 95, bass: 7, treble:-5,pan: -6, reverb:25, echo: 8, eightD:false, colors:['#f59e0b','#84cc16'] },
+    vaporwave:    { label:'Vaporwave',     speed:0.80, pitch:-4.0, volume:100, bass: 5, treble: 0, pan: 12, reverb:48, echo:18, eightD:false, colors:['#ff56c7','#22d3ee'] },
+    phonecall:    { label:'Phone Call',    speed:1.00, pitch: 2.0, volume: 96, bass: 0, treble: 9, pan:  0, reverb: 3, echo: 0, eightD:false, colors:['#10b981','#facc15'] },
+    underwater:   { label:'Underwater',    speed:0.85, pitch:-5.0, volume:100, bass:10, treble:-9,pan: -8, reverb:78, echo:30, eightD:false, colors:['#0284c7','#22d3ee'] },
+    hyperpop:     { label:'Hyperpop',      speed:1.15, pitch: 4.0, volume:104, bass: 4, treble:10, pan:  0, reverb:16, echo: 0, eightD:false, colors:['#f43f5e','#a855f7'] },
+    cinematic:    { label:'Cinematic',     speed:0.92, pitch:-2.0, volume:105, bass:11, treble: 3, pan:  0, reverb:55, echo: 0, eightD:false, colors:['#f97316','#7c3aed'] },
+    dreamscape:   { label:'Dreamscape',    speed:0.82, pitch:-3.0, volume: 94, bass: 3, treble: 2, pan: 10, reverb:74, echo: 0, eightD:false, colors:['#818cf8','#f0abfc'] },
+    cathedral:    { label:'Cathedral',     speed:1.00, pitch: 0.0, volume:100, bass: 2, treble: 5, pan:  0, reverb:92, echo: 0, eightD:false, colors:['#fbbf24','#a78bfa'] },
+    subterranean: { label:'Subterranean',  speed:0.68, pitch:-7.0, volume:112, bass:20, treble:-10,pan: 0, reverb:18, echo: 0, eightD:false, colors:['#ef4444','#581c87'] },
+    crystal:      { label:'Crystal',       speed:1.05, pitch: 5.0, volume: 96, bass: 0, treble:13, pan:  6, reverb:34, echo: 0, eightD:false, colors:['#67e8f9','#c4b5fd'] },
+    alienradio:   { label:'Alien Radio',   speed:1.10, pitch: 7.0, volume: 98, bass: 1, treble:11, pan:-18, reverb:14, echo: 0, eightD:true,  colors:['#84cc16','#22d3ee'] },
+    tapewarmth:   { label:'Tape Warmth',   speed:0.96, pitch:-0.5, volume: 97, bass: 6, treble:-4,pan: -4, reverb:12, echo: 0, eightD:false, colors:['#fb923c','#eab308'] }
 };
 
 function formatPanValue(value) {
@@ -680,11 +702,17 @@ function applyPreset(preset, presetName = 'normal') {
     document.getElementById('panValue').textContent = formatPanValue(preset.pan);
     document.getElementById('reverbSlider').value = preset.reverb;
     document.getElementById('reverbValue').textContent = preset.reverb.toFixed(1) + '%';
+    document.getElementById('echoSlider').value = preset.echo;
+    document.getElementById('echoValue').textContent = preset.echo.toFixed(1) + '%';
 
     if (toneGain)       toneGain.gain.value         = preset.volume / 100;
     if (toneBass)       toneBass.gain.value          = preset.bass;
     if (toneTreble)     toneTreble.gain.value        = preset.treble;
     if (tonePan && !preset.eightD) tonePan.pan.value = preset.pan / 100;
+    if (toneDelay) {
+        toneDelay.wet.value = preset.echo / 100;
+        toneDelay.feedback.value = Math.min(0.55, preset.echo / 100 * 0.5);
+    }
     if (toneReverb)     toneReverb.wet.value         = preset.reverb / 100;
     if (tonePitchShift) tonePitchShift.pitch         = preset.pitch;
 
@@ -801,6 +829,12 @@ async function handleDownload() {
         if (pan && !eightDEnabled) pan.pan.value = parseFloat(document.getElementById('panSlider').value) / 100;
         const gainN  = offCtx.createGain(); gainN.gain.value = parseFloat(document.getElementById('volumeSlider').value) / 100;
 
+        const echoV = parseFloat(document.getElementById('echoSlider').value) / 100;
+        const delay = offCtx.createDelay(5.0); delay.delayTime.value = 0.3;
+        const delayFeedback = offCtx.createGain(); delayFeedback.gain.value = Math.min(0.55, echoV * 0.5);
+        const echoWet = offCtx.createGain(); echoWet.gain.value = echoV;
+        const echoBus = offCtx.createGain();
+
         const conv   = offCtx.createConvolver();
         const rDry   = offCtx.createGain();
         const rWet   = offCtx.createGain();
@@ -820,9 +854,19 @@ async function handleDownload() {
 
         src.connect(bass); bass.connect(treble); treble.connect(pan||gainN);
         if (pan) pan.connect(gainN);
+
+        gainN.connect(echoBus);
+        if (echoV > 0) {
+            gainN.connect(delay);
+            delay.connect(delayFeedback);
+            delayFeedback.connect(delay);
+            delay.connect(echoWet);
+            echoWet.connect(echoBus);
+        }
+
         const merger = offCtx.createGain();
-        gainN.connect(rDry); rDry.connect(merger);
-        if (revV > 0) { gainN.connect(conv); conv.connect(rWet); rWet.connect(merger); }
+        echoBus.connect(rDry); rDry.connect(merger);
+        if (revV > 0) { echoBus.connect(conv); conv.connect(rWet); rWet.connect(merger); }
         merger.connect(comp); comp.connect(outG); outG.connect(offCtx.destination);
         src.start(0);
 
@@ -849,6 +893,7 @@ async function handleDownload() {
         const fx = [];
         if (speed !== 1.0) fx.push(speed + 'x');
         if (pitch !== 0)   fx.push((pitch > 0 ? '+' : '') + pitch + 'st');
+        if (parseFloat(document.getElementById('echoSlider').value) > 0) fx.push('echo');
         a.download = 'edited_' + currentFileName.replace(/\.[^/.]+$/, '') + (fx.length ? '_' + fx.join('_') : '') + '.wav';
         a.click(); URL.revokeObjectURL(url);
     } catch(err) {
