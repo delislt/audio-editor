@@ -262,6 +262,105 @@ function decodeAudioDataCompat(context, arrayBuffer) {
     });
 }
 
+
+function isFlacFile(file) {
+    const name = file && file.name ? file.name : '';
+    const type = file && file.type ? file.type.toLowerCase() : '';
+    return /\.flac$/i.test(name) || type === 'audio/flac' || type === 'audio/x-flac';
+}
+
+async function decodeFlacAudio(context, arrayBuffer) {
+    const flacLibrary = window['flac-decoder'];
+    const DecoderClass = flacLibrary && (
+        (typeof window.Worker === 'function' && flacLibrary.FLACDecoderWebWorker) ||
+        flacLibrary.FLACDecoder
+    );
+
+    if (!DecoderClass) {
+        throw new Error('The FLAC decoder could not be loaded. Check your connection and reload the page.');
+    }
+
+    const decoder = new DecoderClass();
+    try {
+        await withTimeout(
+            decoder.ready,
+            30000,
+            'Loading the FLAC decoder took too long.'
+        );
+
+        const decoded = await withTimeout(
+            decoder.decodeFile(new Uint8Array(arrayBuffer)),
+            120000,
+            'FLAC decoding took too long. Try a shorter file.'
+        );
+
+        const channels = decoded && Array.isArray(decoded.channelData)
+            ? decoded.channelData
+            : [];
+        const samplesDecoded = decoded && Number.isFinite(decoded.samplesDecoded)
+            ? decoded.samplesDecoded
+            : 0;
+        const sampleRate = decoded && Number.isFinite(decoded.sampleRate)
+            ? decoded.sampleRate
+            : 0;
+        const channelLength = channels.length
+            ? Math.min(...channels.map(channel => channel.length))
+            : 0;
+        const sampleCount = Math.min(samplesDecoded, channelLength);
+
+        if (!channels.length || sampleCount <= 0 || sampleRate <= 0) {
+            const decoderMessage = decoded && decoded.errors && decoded.errors[0]
+                ? decoded.errors[0].message
+                : 'No audio samples were found in this FLAC file.';
+            throw new Error(decoderMessage);
+        }
+
+        const buffer = context.createBuffer(channels.length, sampleCount, sampleRate);
+        channels.forEach((channel, channelIndex) => {
+            buffer.copyToChannel(channel.subarray(0, sampleCount), channelIndex);
+        });
+        return buffer;
+    } finally {
+        try {
+            if (typeof decoder.terminate === 'function') decoder.terminate();
+            else if (typeof decoder.free === 'function') decoder.free();
+        } catch (cleanupError) {
+            console.warn('FLAC decoder cleanup error:', cleanupError);
+        }
+    }
+}
+
+async function decodeSelectedAudio(context, file, arrayBuffer, updateStatus) {
+    if (!isFlacFile(file)) {
+        return withTimeout(
+            decodeAudioDataCompat(context, arrayBuffer),
+            60000,
+            'Audio decoding timed out. Try converting the file to MP3 or WAV.'
+        );
+    }
+
+    updateStatus('Decoding FLAC...');
+    try {
+        return await decodeFlacAudio(context, arrayBuffer);
+    } catch (flacError) {
+        console.warn('WebAssembly FLAC decoding failed. Trying the browser decoder:', flacError);
+        updateStatus('Trying browser FLAC decoder...');
+
+        try {
+            return await withTimeout(
+                decodeAudioDataCompat(context, arrayBuffer),
+                60000,
+                'FLAC decoding timed out.'
+            );
+        } catch (nativeError) {
+            const details = flacError && flacError.message
+                ? flacError.message
+                : 'Unknown FLAC decoding error.';
+            throw new Error('This FLAC file could not be decoded. ' + details);
+        }
+    }
+}
+
 async function loadAudioFile(file) {
     if (isLoadingAudio) return;
 
@@ -297,12 +396,13 @@ async function loadAudioFile(file) {
         if (!AudioContextClass) throw new Error('This browser does not support audio decoding.');
         if (!audioContext || audioContext.state === 'closed') audioContext = new AudioContextClass();
 
-        // Decoding does not require the AudioContext to be resumed. Waiting for
-        // resume() here can stall on mobile Safari after the file picker closes.
-        const decodedBuffer = await withTimeout(
-            decodeAudioDataCompat(audioContext, fileData),
-            60000,
-            'Audio decoding timed out. Try converting the file to MP3 or WAV.'
+        // Decoding does not require the AudioContext to be resumed. FLAC uses
+        // a dedicated WebAssembly decoder because native support varies by browser.
+        const decodedBuffer = await decodeSelectedAudio(
+            audioContext,
+            file,
+            fileData,
+            status => { chooseFileBtn.textContent = status; }
         );
 
         audioBuffer = decodedBuffer;
@@ -321,7 +421,7 @@ async function loadAudioFile(file) {
         console.error('Audio loading error:', error);
         audioBuffer = null;
         const details = error && error.message ? error.message : 'Unknown decoding error.';
-        alert('This audio file could not be opened. Try MP3 or WAV.\n\nDetails: ' + details);
+        alert('This audio file could not be opened. The file may be damaged or use an unsupported codec.\n\nDetails: ' + details);
     } finally {
         isLoadingAudio = false;
         chooseFileBtn.innerHTML = originalButtonContent;
