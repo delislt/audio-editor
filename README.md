@@ -49,6 +49,7 @@ Perfect for DJs, producers, podcasters, gamers, and audio enthusiasts.
 ## 🎨 Presets
 
 - Normal, Nightcore, Deep Bass and 8D Orbit
+- Slowed + Reverb, Soft Slowed, Deep Slowed and Ultra Slowed
 - Concert Hall, Slowcore, Lo-Fi and Vaporwave
 - Hyperpop, Cinematic, Dreamscape and Cathedral
 - Subterranean, Crystal, Alien Radio and Tape Warmth
@@ -58,7 +59,7 @@ Perfect for DJs, producers, podcasters, gamers, and audio enthusiasts.
 
 ## 📊 Monitoring & Visualization
 
-- Static waveform on load + real-time visualization  
+- Mirrored waveform on load + live frequency spectrum and waveform visualization  
 - RMS and Peak meter  
 - Peak hold  
 - Clipping alert  
@@ -82,7 +83,7 @@ Perfect for DJs, producers, podcasters, gamers, and audio enthusiasts.
 ## 📥 Import & Export
 
 **Input:** MP3, WAV, OGG, M4A, AAC, and FLAC via drag & drop or file picker.  
-**Output:** WAV file, normalized, with all effects applied.  
+**Output:** WAV lossless, MP3 320 kbps, or MP3 192 kbps, normalized with all effects applied.  
 Rendered offline before download for maximum quality.
 
 ---
@@ -120,7 +121,7 @@ Rendered offline before download for maximum quality.
 - 15+ effects  
 - 8 precision controls  
 - 4 toggles  
-- 18 curated presets  
+- 22 curated presets  
 - 9 shortcuts  
 - ~2800 lines of code  
 - Fully client-side  
