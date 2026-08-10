@@ -1999,61 +1999,186 @@ input[type="range"]::-webkit-slider-track { background: transparent; }
   letter-spacing: .14em;
 }
 .export-group {
+  min-width: min(100%, 430px);
   display: flex;
   align-items: stretch;
-  gap: 8px;
+  gap: 10px;
   margin-left: 10px;
 }
 .export-format {
-  min-width: 150px;
+  min-width: 330px;
   display: grid;
-  gap: 2px;
-  padding: 7px 12px;
+  gap: 8px;
+  padding: 10px;
   border: 1px solid var(--surface-border);
-  border-radius: 15px;
-  background: var(--surface-2);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 12% 0, color-mix(in srgb, var(--vibe-primary) 11%, transparent), transparent 42%),
+    var(--surface-2);
+  box-shadow: inset 0 1px rgba(255,255,255,.05);
 }
-.export-format > span {
+.format-picker-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 3px;
   color: var(--text-faint);
-  font-size: .48rem;
+  font-size: .52rem;
   font-weight: 800;
-  letter-spacing: .14em;
+  letter-spacing: .15em;
+  text-transform: uppercase;
 }
-.export-format select {
-  width: 100%;
-  appearance: none;
-  border: 0;
-  outline: 0;
-  padding: 0 18px 0 0;
-  color: var(--text);
-  background: transparent;
-  font-family: inherit;
-  font-size: .68rem;
-  font-weight: 700;
+.format-picker-heading svg {
+  width: 13px;
+  height: 13px;
+  color: var(--vibe-secondary);
+}
+.format-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+.format-option {
+  position: relative;
+  min-width: 0;
   cursor: pointer;
 }
-.export-format:focus-within {
-  border-color: var(--vibe-secondary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vibe-secondary) 12%, transparent);
+.format-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
-.export-group .download-btn { margin-left: 0; }
-.export-format select:disabled { opacity: .55; cursor: wait; }
+.format-option-surface {
+  position: relative;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  overflow: hidden;
+  padding: 9px 9px 9px 11px;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 12px;
+  color: var(--text-muted);
+  background: rgba(255,255,255,.025);
+  transition:
+    transform .22s ease,
+    color .22s ease,
+    border-color .22s ease,
+    background .22s ease,
+    box-shadow .22s ease;
+}
+.format-option-surface::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--vibe-primary) 28%, transparent), color-mix(in srgb, var(--vibe-secondary) 15%, transparent));
+  transition: opacity .22s ease;
+}
+.format-copy,
+.format-check {
+  position: relative;
+  z-index: 1;
+}
+.format-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.format-copy strong {
+  color: inherit;
+  font-family: var(--font-display);
+  font-size: .72rem;
+  line-height: 1;
+  letter-spacing: .03em;
+}
+.format-copy small {
+  color: var(--text-faint);
+  font-size: .5rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.format-check {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 50%;
+  opacity: .35;
+  transform: scale(.82);
+  transition: opacity .22s ease, transform .3s cubic-bezier(.2,.9,.2,1), background .22s ease;
+}
+.format-check svg {
+  width: 11px;
+  height: 11px;
+}
+.format-option:hover .format-option-surface {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--vibe-secondary) 34%, transparent);
+  transform: translateY(-1px);
+}
+.format-option input:checked + .format-option-surface {
+  color: white;
+  border-color: color-mix(in srgb, var(--vibe-secondary) 52%, var(--vibe-primary));
+  background: color-mix(in srgb, var(--vibe-primary) 12%, var(--surface-2));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--vibe-primary) 18%, transparent);
+}
+.format-option input:checked + .format-option-surface::before {
+  opacity: 1;
+}
+.format-option input:checked + .format-option-surface .format-copy small {
+  color: rgba(255,255,255,.62);
+}
+.format-option input:checked + .format-option-surface .format-check {
+  opacity: 1;
+  transform: scale(1);
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--vibe-primary), var(--vibe-secondary));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--vibe-secondary) 38%, transparent);
+}
+.format-option input:focus-visible + .format-option-surface {
+  outline: 2px solid var(--vibe-secondary);
+  outline-offset: 3px;
+}
+.format-option input:disabled + .format-option-surface {
+  opacity: .5;
+  cursor: wait;
+}
+.export-group .download-btn {
+  min-width: 112px;
+  min-height: 54px;
+  margin-left: 0;
+  align-self: end;
+  justify-content: center;
+  border-radius: 14px;
+}
 
+@media (max-width: 760px) {
+  .export-group {
+    width: 100%;
+    min-width: 0;
+    margin: 6px 0 0;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .export-format { min-width: 0; }
+  .export-group .download-btn {
+    width: 100%;
+    min-height: 50px;
+    margin: 0;
+  }
+}
 @media (max-width: 600px) {
   .waveform-container { min-height: 180px; }
   .visualizer-bands { display: none; }
-  .export-group {
-    width: 100%;
-    margin: 4px 0 0;
-    display: grid;
-    grid-template-columns: 1fr auto;
-  }
-  .export-format { min-width: 0; }
-  .export-group .download-btn { width: auto; margin: 0; }
-}
-@media (max-width: 390px) {
-  .export-group { grid-template-columns: 1fr; }
-  .export-group .download-btn { width: 100%; }
+  .format-options { gap: 5px; }
+  .format-option-surface { min-height: 52px; padding: 8px; }
+  .format-check { width: 16px; height: 16px; flex-basis: 16px; }
 }
 /* Mobile Safari orbit fallback. Uses only 2D transforms for reliable animation. */
 @media (max-width: 600px) {
