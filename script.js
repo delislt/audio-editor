@@ -1,1667 +1,805 @@
-// ============================================================
-// Audio Editor — script.js
-// ============================================================
+'use strict';
 
-// ── Estado global
-let audioContext;
-let audioBuffer;
-let tonePlayer;
-let tonePitchShift;
-let tonePitchDry;
-let tonePitchWet;
-let toneGain;
-let toneBass;
-let toneTreble;
-let tonePan;
-let toneDelay;
-let toneReverb;
-let toneReverbReady = false;
-let toneCompressor;
-let analyserNode;
-let iosAudioUnlockElement;
-let iosAudioUnlockUrl = '';
-let lastAudioPrimeAt = 0;
-
-let isPlaying    = false;
-let pauseOffset  = 0;
-let playStarted  = 0;
-let playbackRateAtStart = 1;
-let eightDEnabled  = false;
-let eightDAudioInterval = null;
-let limiterEnabled = true;
-let currentFileName = '';
-let meterInterval   = null;
-let progressRafId   = null;
-let animationId     = null;
-let isDragging      = false;
-let wasPausedBeforeDrag = false;
-let previousVolume  = 100;
-let isMuted         = false;
-let currentPresetName = 'normal';
-let presetToastTimer = null;
-let pointerRafId = null;
-let lastPointerX = 50;
-let lastPointerY = 30;
-let isApplyingPreset = false;
-let isLoadingAudio = false;
-
-// DOM (aguarda DOMContentLoaded para garantir que os elementos existem)
-document.addEventListener('DOMContentLoaded', initDOM);
-
-let uploadSection, fileInput, playBtn, stopBtn, resetBtn, downloadBtn;
-let progressBar, progressFill, progressThumb, currentTimeEl, totalTimeEl;
-let fileNameEl, waveformCanvas, waveformCtx, playIcon, pauseIcon;
-let pitchProcessingBanner, pitchProcessingInline, eightDToggle;
-let activePresetNameEl, presetToast, presetToastNameEl;
-let presetsSection, presetToggle, presetPanel, presetToggleLabel;
-
-function initDOM() {
-    if (window.lucide) window.lucide.createIcons();
-    uploadSection       = document.getElementById('uploadSection');
-    fileInput           = document.getElementById('fileInput');
-    playBtn             = document.getElementById('playBtn');
-    stopBtn             = document.getElementById('stopBtn');
-    resetBtn            = document.getElementById('resetBtn');
-    downloadBtn         = document.getElementById('downloadBtn');
-    progressBar         = document.getElementById('progressBar');
-    progressFill        = document.getElementById('progressFill');
-    progressThumb       = document.getElementById('progressThumb');
-    currentTimeEl       = document.getElementById('currentTime');
-    totalTimeEl         = document.getElementById('totalTime');
-    fileNameEl          = document.getElementById('fileName');
-    waveformCanvas      = document.getElementById('waveform');
-    waveformCtx         = waveformCanvas.getContext('2d');
-    playIcon            = document.getElementById('playIcon');
-    pauseIcon           = document.getElementById('pauseIcon');
-    pitchProcessingBanner = document.getElementById('pitchProcessingBanner');
-    pitchProcessingInline = document.getElementById('pitchProcessingInline');
-    eightDToggle        = document.getElementById('eightDToggle');
-    activePresetNameEl  = document.getElementById('activePresetName');
-    presetToast         = document.getElementById('presetToast');
-    presetToastNameEl   = document.getElementById('presetToastName');
-    presetsSection       = document.getElementById('presetsSection');
-    presetToggle         = document.getElementById('presetToggle');
-    presetPanel          = document.getElementById('presetPanel');
-    presetToggleLabel    = document.getElementById('presetToggleLabel');
-
-    resizeWaveformCanvas();
-    drawVisualizerIdle();
-
-    attachListeners();
-}
-
-function showPlayIcon()  { if(playIcon)  { playIcon.style.display = ''; }  if(pauseIcon) { pauseIcon.style.display = 'none'; } }
-function showPauseIcon() { if(playIcon)  { playIcon.style.display = 'none'; } if(pauseIcon) { pauseIcon.style.display = ''; } }
-
-// ── Helpers
-function getSpeedValue()     { return parseFloat(document.getElementById('speedSlider').value); }
-function getPitchSemitones() { return parseFloat(document.getElementById('pitchSlider').value); }
-function getDuration()       { return audioBuffer ? audioBuffer.duration : 0; }
-function getAdjustedDuration() { return getDuration() / getSpeedValue(); }
-
-function getCurrentOffset() {
-    if (!isPlaying) return pauseOffset;
-    const elapsed = Math.max(0, Tone.now() - playStarted) * playbackRateAtStart;
-    return Math.min(pauseOffset + elapsed, getDuration());
-}
-
-function setPlaybackSpeed(speed) {
-    // O evento do slider já contém a velocidade nova. Preserve primeiro a
-    // posição calculada com a velocidade que estava ativa neste trecho.
-    const currentOffset = getCurrentOffset();
-    pauseOffset = currentOffset;
-
-    const slider = document.getElementById('speedSlider');
-    slider.value = speed;
-    document.getElementById('speedValue').textContent = speed.toFixed(2) + 'x';
-
-    if (tonePlayer) tonePlayer.playbackRate = speed;
-    playbackRateAtStart = speed;
-    if (isPlaying) playStarted = Tone.now();
-
-    syncProgressUI(currentOffset);
-}
-
-function setRealtimePitch(semitones, immediate = false) {
-    const pitch = Number.isFinite(semitones) ? semitones : 0;
-    if (tonePitchShift) tonePitchShift.pitch = pitch;
-    if (!tonePitchDry || !tonePitchWet) return;
-
-    const neutralPitch = Math.abs(pitch) < 0.01;
-    const dryLevel = neutralPitch ? 1 : 0;
-    const wetLevel = neutralPitch ? 0 : 1;
-
-    if (immediate) {
-        tonePitchDry.gain.value = dryLevel;
-        tonePitchWet.gain.value = wetLevel;
-        return;
-    }
-
-    tonePitchDry.gain.rampTo(dryLevel, 0.04);
-    tonePitchWet.gain.rampTo(wetLevel, 0.04);
-}
-
-// ── Tone.js Graph
-function isIOSDevice() {
-    return /iPad|iPhone|iPod/.test(navigator.userAgent)
-        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
-
-function createSilentWavUrl() {
-    const sampleRate = 8000;
-    const sampleCount = 80;
-    const buffer = new ArrayBuffer(44 + sampleCount * 2);
-    const view = new DataView(buffer);
-    const writeText = (offset, value) => {
-        for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i));
-    };
-
-    writeText(0, 'RIFF');
-    view.setUint32(4, 36 + sampleCount * 2, true);
-    writeText(8, 'WAVE');
-    writeText(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeText(36, 'data');
-    view.setUint32(40, sampleCount * 2, true);
-
-    return URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
-}
-
-function primeIOSAudioSession() {
-    if (!isIOSDevice()) return;
-    if (!iosAudioUnlockElement) {
-        iosAudioUnlockUrl = createSilentWavUrl();
-        iosAudioUnlockElement = new Audio();
-        iosAudioUnlockElement.preload = 'auto';
-        iosAudioUnlockElement.setAttribute('playsinline', '');
-        iosAudioUnlockElement.src = iosAudioUnlockUrl;
-    }
-
-    try {
-        iosAudioUnlockElement.currentTime = 0;
-        const playPromise = iosAudioUnlockElement.play();
-        if (playPromise && typeof playPromise.catch === 'function') playPromise.catch(() => {});
-    } catch (error) {}
-}
-
-function getToneContext() {
-    if (!window.Tone || typeof Tone.getContext !== 'function') {
-        throw new Error('The audio engine could not be loaded. Check your connection and reload the page.');
-    }
-
-    let context = Tone.getContext();
-    if (!context || !context.rawContext) {
-        throw new Error('The real-time audio context could not be created.');
-    }
-
-    if (context.rawContext.state === 'closed') {
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContextClass || typeof Tone.setContext !== 'function') {
-            throw new Error('The real-time audio context could not be restarted.');
-        }
-
-        teardownToneGraph();
-        try { if (analyserNode) analyserNode.disconnect(); } catch (error) {}
-        analyserNode = null;
-
-        let freshRawContext;
-        try {
-            freshRawContext = new AudioContextClass({ latencyHint: 'interactive' });
-        } catch (error) {
-            freshRawContext = new AudioContextClass();
-        }
-        Tone.setContext(freshRawContext);
-        audioContext = freshRawContext;
-        context = Tone.getContext();
-    }
-
-    return context;
-}
-
-function requestRealtimeAudioUnlock() {
-    const now = Date.now();
-    if (now - lastAudioPrimeAt < 120) return;
-    lastAudioPrimeAt = now;
-    primeIOSAudioSession();
-
-    if (!window.Tone) return;
-    try {
-        const rawToneContext = getToneContext().rawContext;
-        if (rawToneContext.state !== 'running' && typeof rawToneContext.resume === 'function') {
-            const resumePromise = rawToneContext.resume();
-            if (resumePromise && typeof resumePromise.catch === 'function') resumePromise.catch(() => {});
-        }
-
-        const silentSource = rawToneContext.createBufferSource();
-        silentSource.buffer = rawToneContext.createBuffer(1, 1, rawToneContext.sampleRate);
-        silentSource.connect(rawToneContext.destination);
-        silentSource.onended = () => {
-            try { silentSource.disconnect(); } catch (error) {}
-        };
-        silentSource.start(0);
-    } catch (error) {
-        console.warn('Audio unlock request failed:', error);
-    }
-}
-
-function getSharedAudioContext() {
-    if (window.Tone && typeof Tone.getContext === 'function') {
-        const rawToneContext = getToneContext().rawContext;
-        if (rawToneContext.state !== 'closed') return rawToneContext;
-    }
-
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) throw new Error('This browser does not support audio decoding.');
-    if (!audioContext || audioContext.state === 'closed') audioContext = new AudioContextClass();
-    return audioContext;
-}
-
-async function ensureRealtimeAudioContext() {
-    const toneContext = getToneContext();
-    const rawToneContext = toneContext.rawContext;
-    const resumeAttempts = [];
-
-    try {
-        resumeAttempts.push(Promise.resolve(Tone.start()));
-    } catch (error) {}
-
-    if (rawToneContext.state !== 'running' && typeof rawToneContext.resume === 'function') {
-        try {
-            resumeAttempts.push(Promise.resolve(rawToneContext.resume()));
-        } catch (error) {}
-    }
-
-    if (resumeAttempts.length) {
-        await withTimeout(
-            Promise.all(resumeAttempts.map(attempt => attempt.catch(() => undefined))),
-            4000,
-            'Audio startup timed out. Tap Play again.'
-        );
-    }
-
-    if (rawToneContext.state !== 'running' && typeof rawToneContext.resume === 'function') {
-        await withTimeout(
-            Promise.resolve(rawToneContext.resume()),
-            2000,
-            'Audio output is still blocked. Tap Play again.'
-        );
-    }
-
-    if (rawToneContext.state !== 'running') {
-        throw new Error('Audio output is blocked. Tap Play again and check the browser sound settings.');
-    }
-
-    audioContext = rawToneContext;
-    return rawToneContext;
-}
-
-async function buildToneGraph() {
-    teardownToneGraph();
-    if (!window.Tone) throw new Error('The audio engine could not be loaded. Check your connection and reload the page.');
-    if (!audioBuffer) throw new Error('No audio file has been loaded.');
-    const rawToneContext = getToneContext().rawContext;
-
-    // O arquivo já foi decodificado pelo AudioContext nativo no upload.
-    // Reutilizar o AudioBuffer evita uma segunda decodificação dentro do Tone.js,
-    // que podia falhar em standardized-audio-context com a mensagem
-    // "A value with the given key could not be found."
-    tonePlayer = new Tone.Player(audioBuffer);
-    tonePlayer.loop = false;
-
-    const initialPitch = getPitchSemitones();
-    tonePitchShift = new Tone.PitchShift({
-        pitch: initialPitch,
-        windowSize: 0.1,
-        delayTime: 0,
-        feedback: 0
+(function () {
+  const Core = window.AudioEditorCore;
+  const EngineApi = window.AudioEditorEngine;
+  const ExportApi = window.AudioEditorExport;
+  if (!Core || !EngineApi || !ExportApi) {
+    document.addEventListener('DOMContentLoaded', () => {
+      const message = document.getElementById('appMessage');
+      if (message) { message.hidden = false; message.textContent = 'Required audio components could not be loaded. Reload the page.'; }
     });
-
-    // PitchShift still uses its phase-vocoder at 0 semitones. A real dry path
-    // restores the original signal when the control returns to neutral.
-    const neutralPitch = Math.abs(initialPitch) < 0.01;
-    tonePitchDry = new Tone.Gain(neutralPitch ? 1 : 0);
-    tonePitchWet = new Tone.Gain(neutralPitch ? 0 : 1);
-
-    const bassVal   = parseFloat(document.getElementById('bassSlider').value);
-    const trebleVal = parseFloat(document.getElementById('trebleSlider').value);
-    toneBass   = new Tone.Filter({ type: 'lowshelf',  frequency: 200,  gain: bassVal });
-    toneTreble = new Tone.Filter({ type: 'highshelf', frequency: 3000, gain: trebleVal });
-
-    const panVal = eightDEnabled ? 0 : parseFloat(document.getElementById('panSlider').value) / 100;
-    tonePan = new Tone.Panner(panVal);
-
-    const volVal = parseFloat(document.getElementById('volumeSlider').value) / 100;
-    toneGain = new Tone.Gain(volVal);
-
-    const echoVal = parseFloat(document.getElementById('echoSlider').value) / 100;
-    toneDelay = new Tone.FeedbackDelay({
-        delayTime: 0.3,
-        feedback: Math.min(0.55, echoVal * 0.5),
-        wet: echoVal
-    });
-
-    toneReverbReady = false;
-    const reverbNode = new Tone.Reverb({ decay: 2.0, wet: 0 });
-    toneReverb = reverbNode;
-    Promise.resolve(reverbNode.ready).then(() => {
-        if (toneReverb !== reverbNode) return;
-        toneReverbReady = true;
-        reverbNode.wet.value = parseFloat(document.getElementById('reverbSlider').value) / 100;
-    }).catch(error => {
-        console.warn('Reverb initialization failed; playback will continue without reverb:', error);
-    });
-
-    toneCompressor = new Tone.Compressor({
-        threshold: -6, knee: 0, ratio: 20, attack: 0.003, release: 0.1
-    });
-
-    if (!analyserNode || analyserNode.context !== rawToneContext) {
-        try { if (analyserNode) analyserNode.disconnect(); } catch (error) {}
-        analyserNode = rawToneContext.createAnalyser();
-        analyserNode.fftSize = 2048;
-        analyserNode.smoothingTimeConstant = 0.8;
-    }
-
-    tonePlayer.connect(tonePitchDry);
-    tonePitchDry.connect(toneBass);
-    tonePlayer.connect(tonePitchShift);
-    tonePitchShift.connect(tonePitchWet);
-    tonePitchWet.connect(toneBass);
-    toneBass.connect(toneTreble);
-    toneTreble.connect(tonePan);
-    tonePan.connect(toneGain);
-    toneGain.connect(toneDelay);
-    toneDelay.connect(toneReverb);
-    toneReverb.connect(toneCompressor);
-
-    // Mantém o caminho audível inteiramente no grafo do Tone.js.
-    // O AnalyserNode nativo recebe apenas uma derivação para medição/visualização.
-    toneCompressor.toDestination();
-    toneCompressor.connect(analyserNode);
-}
-
-function teardownToneGraph() {
-    try { if (tonePlayer)     { tonePlayer.onstop = () => {}; tonePlayer.stop(); tonePlayer.dispose(); } } catch(e){}
-    try { if (tonePitchShift) { tonePitchShift.dispose(); }                    } catch(e){}
-    try { if (tonePitchDry)   { tonePitchDry.dispose(); }                      } catch(e){}
-    try { if (tonePitchWet)   { tonePitchWet.dispose(); }                      } catch(e){}
-    try { if (toneBass)       { toneBass.dispose(); }                          } catch(e){}
-    try { if (toneTreble)     { toneTreble.dispose(); }                        } catch(e){}
-    try { if (tonePan)        { tonePan.dispose(); }                           } catch(e){}
-    try { if (toneGain)       { toneGain.dispose(); }                          } catch(e){}
-    try { if (toneDelay)      { toneDelay.dispose(); }                         } catch(e){}
-    try { if (toneReverb)     { toneReverb.dispose(); }                        } catch(e){}
-    try { if (toneCompressor) { toneCompressor.dispose(); }                    } catch(e){}
-    tonePlayer = tonePitchShift = tonePitchDry = tonePitchWet = null;
-    toneBass = toneTreble = tonePan = toneGain = null;
-    toneDelay = toneReverb = toneCompressor = null;
-    toneReverbReady = false;
-}
-
-// ── Upload
-function attachUploadListeners() {
-    if (!fileInput || !uploadSection) return;
-
-    const resetFileInput = () => {
-        // Permite selecionar novamente o mesmo arquivo.
-        fileInput.value = '';
-    };
-
-    // O uploadSection é um label ligado ao input. Em celulares, essa ativação
-    // nativa é mais confiável do que abrir o seletor apenas com input.click().
-    uploadSection.addEventListener('pointerdown', () => {
-        requestRealtimeAudioUnlock();
-        resetFileInput();
-    });
-    uploadSection.addEventListener('keydown', e => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        resetFileInput();
-        fileInput.click();
-    });
-
-    ['dragenter', 'dragover'].forEach(type => uploadSection.addEventListener(type, e => {
-        e.preventDefault();
-        uploadSection.classList.add('drag-over');
-    }));
-    ['dragleave', 'dragend'].forEach(type => uploadSection.addEventListener(type, () => {
-        uploadSection.classList.remove('drag-over');
-    }));
-    uploadSection.addEventListener('drop', e => {
-        e.preventDefault();
-        uploadSection.classList.remove('drag-over');
-        const file = e.dataTransfer && e.dataTransfer.files[0];
-        if (file) loadAudioFile(file);
-    });
-    fileInput.addEventListener('change', e => {
-        const file = e.target.files && e.target.files[0];
-        if (file) loadAudioFile(file);
-    });
-}
-
-function withTimeout(promise, timeoutMs, message) {
-    let timeoutId;
-    const timeout = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
-    });
-    return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
-}
-
-function decodeAudioDataCompat(context, arrayBuffer) {
-    return new Promise((resolve, reject) => {
-        let settled = false;
-        const succeed = buffer => {
-            if (settled) return;
-            settled = true;
-            resolve(buffer);
-        };
-        const fail = error => {
-            if (settled) return;
-            settled = true;
-            reject(error || new Error('The browser could not decode this audio file.'));
-        };
-
-        try {
-            const result = context.decodeAudioData(arrayBuffer.slice(0), succeed, fail);
-            if (result && typeof result.then === 'function') result.then(succeed, fail);
-        } catch (error) {
-            fail(error);
-        }
-    });
-}
-
-
-function isFlacFile(file) {
-    const name = file && file.name ? file.name : '';
-    const type = file && file.type ? file.type.toLowerCase() : '';
-    return /\.flac$/i.test(name) || type === 'audio/flac' || type === 'audio/x-flac';
-}
-
-async function decodeFlacAudio(context, arrayBuffer) {
-    const flacLibrary = window['flac-decoder'];
-    const DecoderClass = flacLibrary && (
-        (typeof window.Worker === 'function' && flacLibrary.FLACDecoderWebWorker) ||
-        flacLibrary.FLACDecoder
-    );
-
-    if (!DecoderClass) {
-        throw new Error('The FLAC decoder could not be loaded. Check your connection and reload the page.');
-    }
-
-    const decoder = new DecoderClass();
-    try {
-        await withTimeout(
-            decoder.ready,
-            30000,
-            'Loading the FLAC decoder took too long.'
-        );
-
-        const decoded = await withTimeout(
-            decoder.decodeFile(new Uint8Array(arrayBuffer)),
-            120000,
-            'FLAC decoding took too long. Try a shorter file.'
-        );
-
-        const channels = decoded && Array.isArray(decoded.channelData)
-            ? decoded.channelData
-            : [];
-        const samplesDecoded = decoded && Number.isFinite(decoded.samplesDecoded)
-            ? decoded.samplesDecoded
-            : 0;
-        const sampleRate = decoded && Number.isFinite(decoded.sampleRate)
-            ? decoded.sampleRate
-            : 0;
-        const channelLength = channels.length
-            ? Math.min(...channels.map(channel => channel.length))
-            : 0;
-        const sampleCount = Math.min(samplesDecoded, channelLength);
-
-        if (!channels.length || sampleCount <= 0 || sampleRate <= 0) {
-            const decoderMessage = decoded && decoded.errors && decoded.errors[0]
-                ? decoded.errors[0].message
-                : 'No audio samples were found in this FLAC file.';
-            throw new Error(decoderMessage);
-        }
-
-        const buffer = context.createBuffer(channels.length, sampleCount, sampleRate);
-        channels.forEach((channel, channelIndex) => {
-            buffer.copyToChannel(channel.subarray(0, sampleCount), channelIndex);
-        });
-        return buffer;
-    } finally {
-        try {
-            if (typeof decoder.terminate === 'function') decoder.terminate();
-            else if (typeof decoder.free === 'function') decoder.free();
-        } catch (cleanupError) {
-            console.warn('FLAC decoder cleanup error:', cleanupError);
-        }
-    }
-}
-
-async function decodeSelectedAudio(context, file, arrayBuffer, updateStatus) {
-    if (!isFlacFile(file)) {
-        return withTimeout(
-            decodeAudioDataCompat(context, arrayBuffer),
-            60000,
-            'Audio decoding timed out. Try converting the file to MP3 or WAV.'
-        );
-    }
-
-    updateStatus('Decoding FLAC...');
-    try {
-        return await decodeFlacAudio(context, arrayBuffer);
-    } catch (flacError) {
-        console.warn('WebAssembly FLAC decoding failed. Trying the browser decoder:', flacError);
-        updateStatus('Trying browser FLAC decoder...');
-
-        try {
-            return await withTimeout(
-                decodeAudioDataCompat(context, arrayBuffer),
-                60000,
-                'FLAC decoding timed out.'
-            );
-        } catch (nativeError) {
-            const details = flacError && flacError.message
-                ? flacError.message
-                : 'Unknown FLAC decoding error.';
-            throw new Error('This FLAC file could not be decoded. ' + details);
-        }
-    }
-}
-
-async function loadAudioFile(file) {
-    if (isLoadingAudio) return;
-
-    const chooseFileBtn = document.getElementById('chooseFileBtn');
-    const originalButtonContent = chooseFileBtn.innerHTML;
-    const validExtension = file && /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(file.name);
-    if (!file || (!(file.type || '').startsWith('audio/') && !validExtension)) {
-        alert('Choose a valid audio file: MP3, WAV, OGG, M4A, AAC, or FLAC.');
-        return;
-    }
-
-    isLoadingAudio = true;
-    try {
-        chooseFileBtn.textContent = 'Reading file...';
-        uploadSection.setAttribute('aria-busy', 'true');
-        uploadSection.setAttribute('aria-disabled', 'true');
-        isPlaying = false;
-        pauseOffset = 0;
-        playbackRateAtStart = getSpeedValue();
-        teardownToneGraph();
-        stopLevelMeter();
-        cancelAnimationFrame(progressRafId);
-        cancelAnimationFrame(animationId);
-
-        const fileData = await withTimeout(
-            Promise.resolve().then(() => file.arrayBuffer()),
-            90000,
-            'Reading this file took too long. If it is stored in the cloud, download it to the device and try again.'
-        );
-
-        chooseFileBtn.textContent = 'Decoding...';
-        // Decode and play through the same AudioContext. This avoids a suspended
-        // secondary context taking over the mobile audio session.
-        audioContext = getSharedAudioContext();
-
-        // Decoding does not require the AudioContext to be resumed. FLAC uses
-        // a dedicated WebAssembly decoder because native support varies by browser.
-        const decodedBuffer = await decodeSelectedAudio(
-            audioContext,
-            file,
-            fileData,
-            status => { chooseFileBtn.textContent = status; }
-        );
-
-        audioBuffer = decodedBuffer;
-        currentFileName = file.name;
-        if (fileNameEl) fileNameEl.textContent = currentFileName;
-
-        document.querySelectorAll('.player-section').forEach(el => el.classList.add('active'));
-        chooseFileBtn.textContent = 'Building waveform...';
-        await new Promise(resolve => requestAnimationFrame(resolve));
-        drawWaveform();
-        showPlayIcon();
-        syncProgressUI(0);
-        if (totalTimeEl) totalTimeEl.textContent = formatTime(getAdjustedDuration());
-        console.log('Audio loaded:', file.name);
-    } catch (error) {
-        console.error('Audio loading error:', error);
-        audioBuffer = null;
-        const details = error && error.message ? error.message : 'Unknown decoding error.';
-        alert('This audio file could not be opened. The file may be damaged or use an unsupported codec.\n\nDetails: ' + details);
-    } finally {
-        isLoadingAudio = false;
-        chooseFileBtn.innerHTML = originalButtonContent;
-        uploadSection.removeAttribute('aria-busy');
-        uploadSection.removeAttribute('aria-disabled');
-        if (window.lucide) window.lucide.createIcons();
-    }
-}
-
-// ── Playback
-async function play() {
-    requestRealtimeAudioUnlock();
-    if (!audioBuffer) return;
-    if (isPlaying) { pause(); return; }
-    try {
-        if (!window.Tone) throw new Error('The audio engine could not be loaded. Check your connection and reload the page.');
-        await ensureRealtimeAudioContext();
-        if (!tonePlayer || !tonePlayer.loaded) await buildToneGraph();
-        await ensureRealtimeAudioContext();
-    } catch (err) {
-        console.error('Playback error:', err);
-        alert(err.message);
-        return;
-    }
-
-    const speed = getSpeedValue();
-    tonePlayer.playbackRate = speed;
-    playbackRateAtStart = speed;
-    setRealtimePitch(getPitchSemitones(), true);
-
-    const maxOffset = Math.max(0, getDuration() - 0.01);
-    const offset = Math.max(0, Math.min(pauseOffset, maxOffset));
-    const startAt = Tone.now();
-    pauseOffset = offset;
-    tonePlayer.onstop = () => {};
-    tonePlayer.start(startAt, offset);
-    playStarted = startAt;
-    isPlaying   = true;
-    showPauseIcon();
-
-    visualize();
-    scheduleProgressUpdate();
-    startLevelMeter();
-}
-
-function _onEnded() {
-    isPlaying = false; pauseOffset = 0;
-    showPlayIcon(); syncProgressUI(0);
-    cancelAnimationFrame(progressRafId);
-    cancelAnimationFrame(animationId);
-    stopLevelMeter();
-    setVisualizerLive(false);
-    drawWaveform();
-}
-
-function pause() {
-    if (!isPlaying) return;
-    pauseOffset = getCurrentOffset();
-    isPlaying = false;
-    try { tonePlayer.stop(); } catch(e){}
-    showPlayIcon();
-    cancelAnimationFrame(progressRafId);
-    cancelAnimationFrame(animationId);
-    stopLevelMeter();
-    setVisualizerLive(false);
-    drawWaveform();
-}
-
-function stop() {
-    isPlaying = false;
-    try { if (tonePlayer) tonePlayer.stop(); } catch(e){}
-    pauseOffset = 0;
-    showPlayIcon(); syncProgressUI(0);
-    cancelAnimationFrame(progressRafId);
-    cancelAnimationFrame(animationId);
-    stopLevelMeter();
-    setVisualizerLive(false);
-    drawWaveform();
-}
-
-// ── Progress UI
-function syncProgressUI(overrideOffset) {
-    const offset = overrideOffset !== undefined ? overrideOffset : getCurrentOffset();
-    const dur    = getDuration();
-    const adjDur = getAdjustedDuration();
-    const adjOff = dur > 0 ? (offset / dur) * adjDur : 0;
-    const ratio  = adjDur > 0 ? Math.max(0, Math.min(1, adjOff / adjDur)) : 0;
-    const pct    = (ratio * 100).toFixed(4) + '%';
-    if (progressFill)  progressFill.style.width = pct;
-    if (progressThumb) progressThumb.style.left = pct;
-    if (currentTimeEl) currentTimeEl.textContent = formatTime(adjOff);
-    if (totalTimeEl)   totalTimeEl.textContent   = formatTime(adjDur);
-}
-
-function scheduleProgressUpdate() {
-    cancelAnimationFrame(progressRafId);
-    if (!isPlaying || isDragging) return;
-    const offset = getCurrentOffset();
-    syncProgressUI(offset);
-    if (offset >= getDuration()) {
-        _onEnded();
-        return;
-    }
-    progressRafId = requestAnimationFrame(scheduleProgressUpdate);
-}
-
-// ── Seek
-function seekToPosition(clientX) {
-    if (!audioBuffer || !progressBar) return;
-    const rect  = progressBar.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    pauseOffset = ratio * getDuration();
-    syncProgressUI(pauseOffset);
-}
-
-// ── Attach all listeners (called from initDOM)
-function attachListeners() {
-    attachUploadListeners();
-
-    // Seek
-    progressBar.addEventListener('mousedown', e => {
-        if (!audioBuffer) return;
-        isDragging = true; wasPausedBeforeDrag = !isPlaying;
-        if (isPlaying) pause();
-        seekToPosition(e.clientX); progressBar.style.cursor = 'grabbing';
-    });
-    progressBar.addEventListener('touchstart', e => {
-        if (!audioBuffer) return;
-        isDragging = true; wasPausedBeforeDrag = !isPlaying;
-        if (isPlaying) pause();
-        seekToPosition(e.touches[0].clientX);
-    }, { passive: true });
-    document.addEventListener('mousemove',  e => { if (isDragging) seekToPosition(e.clientX); });
-    document.addEventListener('touchmove',  e => { if (isDragging) seekToPosition(e.touches[0].clientX); }, { passive: true });
-    document.addEventListener('mouseup',    () => { if (!isDragging) return; isDragging = false; progressBar.style.cursor = 'pointer'; if (!wasPausedBeforeDrag) play(); });
-    document.addEventListener('touchend',   () => { if (!isDragging) return; isDragging = false; if (!wasPausedBeforeDrag) play(); });
-
-    // Sliders
-    document.getElementById('speedSlider').addEventListener('input', e => {
-        const v = parseFloat(e.target.value);
-        setPlaybackSpeed(v);
-    });
-
-    document.getElementById('pitchSlider').addEventListener('input', e => {
-        const v = parseFloat(e.target.value);
-        document.getElementById('pitchValue').textContent = v.toFixed(1) + ' st';
-        setRealtimePitch(v);
-    });
-
-    document.getElementById('volumeSlider').addEventListener('input', e => {
-        const v = parseFloat(e.target.value);
-        document.getElementById('volumeValue').textContent = v.toFixed(1) + '%';
-        if (toneGain) toneGain.gain.value = v / 100;
-    });
-
-    document.getElementById('bassSlider').addEventListener('input', e => {
-        const v = parseFloat(e.target.value);
-        document.getElementById('bassValue').textContent = v.toFixed(1) + ' dB';
-        if (toneBass) toneBass.gain.value = v;
-    });
-
-    document.getElementById('trebleSlider').addEventListener('input', e => {
-        const v = parseFloat(e.target.value);
-        document.getElementById('trebleValue').textContent = v.toFixed(1) + ' dB';
-        if (toneTreble) toneTreble.gain.value = v;
-    });
-
-    document.getElementById('panSlider').addEventListener('input', e => {
-        const v = parseFloat(e.target.value);
-        const av = Math.abs(v).toFixed(1);
-        document.getElementById('panValue').textContent = v === 0 ? 'Center' : v < 0 ? av + '% Left' : av + '% Right';
-        if (tonePan && !eightDEnabled) tonePan.pan.value = v / 100;
-    });
-
-    document.getElementById('reverbSlider').addEventListener('input', e => {
-        const v = parseFloat(e.target.value);
-        document.getElementById('reverbValue').textContent = v.toFixed(1) + '%';
-        if (toneReverb && toneReverbReady) toneReverb.wet.value = v / 100;
-    });
-
-    document.getElementById('echoSlider').addEventListener('input', e => {
-        const v = parseFloat(e.target.value);
-        document.getElementById('echoValue').textContent = v.toFixed(1) + '%';
-        if (toneDelay) {
-            toneDelay.wet.value = v / 100;
-            toneDelay.feedback.value = Math.min(0.55, v / 100 * 0.5);
-        }
-    });
-
-    // Stubs
-    document.getElementById('preGainSlider').addEventListener('input', () => {});
-    document.getElementById('outputGainSlider').addEventListener('input', () => {});
-    document.getElementById('limiterToggle').addEventListener('click', () => {
-        limiterEnabled = !limiterEnabled;
-        document.getElementById('limiterToggle').classList.toggle('active');
-    });
-
-    // 8D
-    eightDToggle.addEventListener('click', () => {
-        eightDEnabled = !eightDEnabled;
-        eightDToggle.classList.toggle('active');
-        eightDToggle.setAttribute('aria-checked', String(eightDEnabled));
-        if (eightDEnabled) start8DAudio(); else stop8DAudio();
-        if (!isApplyingPreset) markPresetCustom();
-    });
-    document.getElementById('eightDSpeed').addEventListener('input', e => {
-        document.getElementById('eightDSpeedValue').textContent = parseFloat(e.target.value).toFixed(1);
-        if (eightDEnabled) { stop8DAudio(); start8DAudio(); }
-    });
-
-    // Buttons
-    playBtn.addEventListener('pointerdown', requestRealtimeAudioUnlock, { passive: true });
-    playBtn.addEventListener('touchstart', requestRealtimeAudioUnlock, { passive: true });
-    playBtn.addEventListener('click', play);
-    stopBtn.addEventListener('click', stop);
-    resetBtn.addEventListener('click', () => applyPreset(presets.normal, 'normal'));
-
-    // Presets
-    document.querySelectorAll('.preset-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const presetName = btn.dataset.preset;
-            const preset = presets[presetName];
-            if (preset) applyPreset(preset, presetName);
-        });
-    });
-
-    document.querySelectorAll('.preset-filter').forEach(filterBtn => {
-        filterBtn.addEventListener('click', () => filterPresets(filterBtn.dataset.filter));
-    });
-
-    if (presetToggle) {
-        presetToggle.addEventListener('click', () => {
-            setPresetsExpanded(presetToggle.getAttribute('aria-expanded') !== 'true');
-        });
-    }
-
-    initializeInteractiveDesign();
-
-    // Download
-    downloadBtn.addEventListener('click', handleDownload);
-
-    // Keyboard
-    document.addEventListener('keydown', handleKeydown);
-
-    // Resize
-    window.addEventListener('resize', () => {
-        resizeWaveformCanvas();
-        if (!isPlaying) drawWaveform();
-    });
-}
-
-// ── 8D Audio
-function start8DAudio() {
-    if (!tonePan) return;
-    const speed = parseFloat(document.getElementById('eightDSpeed').value);
-    let angle = 0;
-    eightDAudioInterval = setInterval(() => {
-        angle += 0.05 * speed;
-        if (tonePan) tonePan.pan.value = Math.sin(angle);
-    }, 50);
-}
-function stop8DAudio() {
-    if (eightDAudioInterval) { clearInterval(eightDAudioInterval); eightDAudioInterval = null; }
-    if (tonePan) tonePan.pan.value = parseFloat(document.getElementById('panSlider').value) / 100;
-}
-
-// ── Waveform / Visualize
-function resizeWaveformCanvas() {
-    if (!waveformCanvas) return { width: 1, height: 1, dpr: 1 };
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const rect = waveformCanvas.getBoundingClientRect();
-    const width = Math.max(1, Math.round(rect.width * dpr));
-    const height = Math.max(1, Math.round(rect.height * dpr));
-    if (waveformCanvas.width !== width || waveformCanvas.height !== height) {
-        waveformCanvas.width = width;
-        waveformCanvas.height = height;
-    }
-    return { width, height, dpr };
-}
-
-function getVisualizerColors() {
-    const styles = getComputedStyle(document.documentElement);
+    return;
+  }
+
+  const $ = (id) => document.getElementById(id);
+  const PRESET_STORAGE_KEY = 'audio-editor-presets-v1';
+  const SUPPORTED_EXTENSION = /\.(mp3|wav|ogg|m4a|aac|flac)$/i;
+  const DEFAULT_ADVANCED_EQ = [
+    { id: 'eq-1', enabled: false, type: 'lowshelf', frequency: 100, gain: 0, q: 0.7 },
+    { id: 'eq-2', enabled: false, type: 'bell', frequency: 250, gain: 0, q: 1 },
+    { id: 'eq-3', enabled: false, type: 'bell', frequency: 1000, gain: 0, q: 1 },
+    { id: 'eq-4', enabled: false, type: 'bell', frequency: 4000, gain: 0, q: 1 },
+    { id: 'eq-5', enabled: false, type: 'highshelf', frequency: 12000, gain: 0, q: 0.7 },
+  ];
+
+  function defaultEffects() {
     return {
-        primary: styles.getPropertyValue('--vibe-primary').trim() || '#8b5cf6',
-        secondary: styles.getPropertyValue('--vibe-secondary').trim() || '#22d3ee',
-        light: document.documentElement.getAttribute('data-theme') === 'light'
+      speed: 1, pitch: 0, fineTune: 0, volume: 100, gainDb: 0,
+      bass: 0, mid: 0, treble: 0, reverb: 0, echo: 0, pan: 0,
+      eightD: false, eightDSpeed: 2, advancedEq: JSON.parse(JSON.stringify(DEFAULT_ADVANCED_EQ)),
+      vocalBoost: 0, stereoWidth: 100, distortionDrive: 0, distortionMix: 0,
+      highPassEnabled: false, highPassFrequency: 80,
+      lowPassEnabled: false, lowPassFrequency: 18000,
+      compressorEnabled: false, compressorThreshold: -18, compressorRatio: 3,
+      limiterEnabled: true, limiterThreshold: -1,
     };
-}
+  }
 
-function drawVisualizerBackdrop(width, height, colors) {
-    const background = waveformCtx.createLinearGradient(0, 0, width, height);
-    if (colors.light) {
-        background.addColorStop(0, '#eef0fb');
-        background.addColorStop(0.5, '#e3e8f6');
-        background.addColorStop(1, '#edf7fa');
-    } else {
-        background.addColorStop(0, '#070813');
-        background.addColorStop(0.5, '#0c0d1b');
-        background.addColorStop(1, '#071319');
-    }
-    waveformCtx.fillStyle = background;
-    waveformCtx.fillRect(0, 0, width, height);
+  const FACTORY_PRESETS = {
+    normal:       { label: 'Normal', category: 'essential', icon: 'circle-dot', description: 'Clean reference', speed: 1, pitch: 0, volume: 100, bass: 0, treble: 0, pan: 0, reverb: 0, echo: 0, eightD: false, colors: ['#8b5cf6', '#22d3ee'] },
+    nightcore:    { label: 'Nightcore', category: 'extreme', icon: 'zap', description: 'Fast and bright', speed: 1.30, pitch: 3, volume: 100, bass: 1, treble: 6, pan: 0, reverb: 8, echo: 0, eightD: false, colors: ['#ff56c7', '#22d3ee'] },
+    deepbass:     { label: 'Deep Bass', category: 'character', icon: 'waves', description: 'Heavy low end', speed: 0.90, pitch: -3, volume: 110, bass: 15, treble: -5, pan: 0, reverb: 10, echo: 5, eightD: false, colors: ['#7c3aed', '#f43f5e'] },
+    '8daudio':    { label: '8D Orbit', category: 'space', icon: 'orbit', description: 'Moving panorama', speed: 1, pitch: 0, volume: 100, bass: 3, treble: 2, pan: 0, reverb: 24, echo: 15, eightD: true, colors: ['#06b6d4', '#8b5cf6'] },
+    concert:      { label: 'Concert Hall', category: 'space', icon: 'music', description: 'Wide live room', speed: 1, pitch: 0, volume: 103, bass: 7, treble: 4, pan: 0, reverb: 58, echo: 20, eightD: false, colors: ['#f59e0b', '#ec4899'] },
+    slowcore:     { label: 'Slowcore', category: 'character', icon: 'cloud-rain', description: 'Heavy and spacious', speed: 0.72, pitch: -2, volume: 100, bass: 5, treble: -2, pan: 0, reverb: 62, echo: 12, eightD: false, colors: ['#6366f1', '#94a3b8'] },
+    lofi:         { label: 'Lo-Fi', category: 'character', icon: 'coffee', description: 'Soft worn tape', speed: 0.92, pitch: -1, volume: 95, bass: 7, treble: -5, pan: -6, reverb: 25, echo: 8, eightD: false, colors: ['#f59e0b', '#84cc16'] },
+    vaporwave:    { label: 'Vaporwave', category: 'character', icon: 'sunset', description: 'Dreamy retro drift', speed: 0.80, pitch: -4, volume: 100, bass: 5, treble: 0, pan: 12, reverb: 48, echo: 18, eightD: false, colors: ['#ff56c7', '#22d3ee'] },
+    phonecall:    { label: 'Phone Call', category: 'essential', icon: 'radio', description: 'Narrow and crisp', speed: 1, pitch: 2, volume: 96, bass: 0, treble: 9, pan: 0, reverb: 3, echo: 0, eightD: false, highPassEnabled: true, highPassFrequency: 350, lowPassEnabled: true, lowPassFrequency: 3800, colors: ['#10b981', '#facc15'] },
+    underwater:   { label: 'Underwater', category: 'space', icon: 'droplets', description: 'Deep liquid haze', speed: 0.85, pitch: -5, volume: 100, bass: 10, treble: -9, pan: -8, reverb: 78, echo: 30, eightD: false, lowPassEnabled: true, lowPassFrequency: 2600, colors: ['#0284c7', '#22d3ee'] },
+    hyperpop:     { label: 'Hyperpop', category: 'extreme', icon: 'sparkles', description: 'Glossy and electric', speed: 1.15, pitch: 4, volume: 104, bass: 4, treble: 10, pan: 0, reverb: 16, echo: 0, eightD: false, colors: ['#f43f5e', '#a855f7'] },
+    cinematic:    { label: 'Cinematic', category: 'space', icon: 'clapperboard', description: 'Large dramatic field', speed: 0.92, pitch: -2, volume: 105, bass: 11, treble: 3, pan: 0, reverb: 55, echo: 0, eightD: false, stereoWidth: 145, colors: ['#f97316', '#7c3aed'] },
+    dreamscape:   { label: 'Dreamscape', category: 'space', icon: 'moon-star', description: 'Soft endless air', speed: 0.82, pitch: -3, volume: 94, bass: 3, treble: 2, pan: 10, reverb: 74, echo: 0, eightD: false, stereoWidth: 135, colors: ['#818cf8', '#f0abfc'] },
+    cathedral:    { label: 'Cathedral', category: 'space', icon: 'landmark', description: 'Massive sacred room', speed: 1, pitch: 0, volume: 100, bass: 2, treble: 5, pan: 0, reverb: 92, echo: 0, eightD: false, colors: ['#fbbf24', '#a78bfa'] },
+    subterranean: { label: 'Subterranean', category: 'extreme', icon: 'chevrons-down', description: 'Dark seismic weight', speed: 0.68, pitch: -7, volume: 112, bass: 20, treble: -10, pan: 0, reverb: 18, echo: 0, eightD: false, colors: ['#ef4444', '#581c87'] },
+    crystal:      { label: 'Crystal', category: 'character', icon: 'gem', description: 'Bright detail', speed: 1.05, pitch: 5, volume: 96, bass: 0, treble: 13, pan: 6, reverb: 34, echo: 0, eightD: false, colors: ['#67e8f9', '#c4b5fd'] },
+    alienradio:   { label: 'Alien Radio', category: 'extreme', icon: 'satellite', description: 'Strange transmission', speed: 1.10, pitch: 7, volume: 98, bass: 1, treble: 11, pan: -18, reverb: 14, echo: 0, eightD: true, distortionDrive: 22, distortionMix: 18, colors: ['#84cc16', '#22d3ee'] },
+    tapewarmth:   { label: 'Tape Warmth', category: 'character', icon: 'cassette-tape', description: 'Rounded analog glow', speed: 0.96, pitch: -0.5, volume: 97, bass: 6, treble: -4, pan: -4, reverb: 12, echo: 0, eightD: false, distortionDrive: 9, distortionMix: 10, colors: ['#fb923c', '#eab308'] },
+    slowedreverb: { label: 'Slowed + Reverb', category: 'slowed', icon: 'cloud-moon', description: '0.85x, balanced space', speed: 0.85, pitch: 0, volume: 100, bass: 0, treble: 0, pan: 0, reverb: 50, echo: 0, eightD: false, colors: ['#8b5cf6', '#38bdf8'] },
+    softslowed:   { label: 'Soft Slowed', category: 'slowed', icon: 'feather', description: '0.92x, light reverb', speed: 0.92, pitch: 0, volume: 100, bass: 0, treble: 0, pan: 0, reverb: 30, echo: 0, eightD: false, colors: ['#a78bfa', '#67e8f9'] },
+    deepslowed:   { label: 'Deep Slowed', category: 'slowed', icon: 'moon', description: '0.75x, deep reverb', speed: 0.75, pitch: 0, volume: 100, bass: 0, treble: 0, pan: 0, reverb: 65, echo: 0, eightD: false, colors: ['#6366f1', '#0ea5e9'] },
+    ultraslowed:  { label: 'Ultra Slowed', category: 'slowed', icon: 'cloud-fog', description: '0.65x, huge reverb', speed: 0.65, pitch: 0, volume: 100, bass: 0, treble: 0, pan: 0, reverb: 82, echo: 0, eightD: false, colors: ['#4f46e5', '#7dd3fc'] },
+    vocalboost:   { label: 'Vocal Boost', category: 'voice', icon: 'mic-2', description: 'Clear vocal presence', vocalBoost: 72, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 2.5, bass: -1, mid: 2, treble: 2, colors: ['#ec4899', '#22d3ee'] },
+    podcast:      { label: 'Podcast', category: 'voice', icon: 'podcast', description: 'Controlled spoken voice', vocalBoost: 58, compressorEnabled: true, compressorThreshold: -22, compressorRatio: 3.5, limiterEnabled: true, limiterThreshold: -1, highPassEnabled: true, highPassFrequency: 75, bass: -2, mid: 2, treble: 1.5, gainDb: 1.5, colors: ['#14b8a6', '#8b5cf6'] },
+  };
 
-    waveformCtx.save();
-    waveformCtx.strokeStyle = colors.light ? 'rgba(79,70,130,.09)' : 'rgba(255,255,255,.045)';
-    waveformCtx.lineWidth = 1;
-    const grid = Math.max(24, Math.round(width / 28));
-    for (let x = 0; x <= width; x += grid) {
-        waveformCtx.beginPath();
-        waveformCtx.moveTo(x, 0);
-        waveformCtx.lineTo(x, height);
-        waveformCtx.stroke();
-    }
-    for (let y = 0; y <= height; y += grid) {
-        waveformCtx.beginPath();
-        waveformCtx.moveTo(0, y);
-        waveformCtx.lineTo(width, y);
-        waveformCtx.stroke();
-    }
-    waveformCtx.restore();
-}
+  const state = {
+    originalData: null, workingData: null, originalBuffer: null, workingBuffer: null,
+    clipboard: null, selection: null, playhead: 0, zoom: 1, compareMode: 'modified',
+    effects: defaultEffects(), history: new Core.AudioHistory({ maxEntries: 12, maxBytes: 256 * 1024 * 1024 }),
+    file: null, activePreset: 'normal', userPresets: [], draggingSelection: false,
+    pointerStartX: 0, pointerStartTime: 0, animationFrame: 0, transportRestartTimer: 0,
+    lastSection: 'basic', loading: false, exporting: false,
+  };
 
-function setVisualizerLive(live) {
-    const container = document.getElementById('visualizerContainer');
-    if (container) container.classList.toggle('is-live', live);
-}
+  let engine;
+  let canvas;
+  let canvasContext;
+  let waveformBaseCanvas;
+  let waveformCacheKey = '';
 
-function drawVisualizerIdle() {
-    if (!waveformCanvas || !waveformCtx) return;
-    const { width, height, dpr } = resizeWaveformCanvas();
-    const colors = getVisualizerColors();
-    drawVisualizerBackdrop(width, height, colors);
-
-    const center = height / 2;
-    const barCount = 56;
-    const gap = 3 * dpr;
-    const barWidth = Math.max(2 * dpr, (width - gap * (barCount - 1)) / barCount);
-    const gradient = waveformCtx.createLinearGradient(0, center - height * .25, 0, center + height * .25);
-    gradient.addColorStop(0, colors.primary);
-    gradient.addColorStop(1, colors.secondary);
-    waveformCtx.fillStyle = gradient;
-    waveformCtx.globalAlpha = .42;
-    for (let i = 0; i < barCount; i++) {
-        const envelope = Math.sin((i / (barCount - 1)) * Math.PI);
-        const variation = .35 + .65 * Math.abs(Math.sin(i * 1.73));
-        const barHeight = (6 * dpr) + envelope * variation * height * .22;
-        const x = i * (barWidth + gap);
-        waveformCtx.fillRect(x, center - barHeight, barWidth, barHeight * 2);
-    }
-    waveformCtx.globalAlpha = 1;
-}
-
-function drawWaveform() {
-    if (!waveformCanvas || !waveformCtx) return;
-    if (!audioBuffer) {
-        drawVisualizerIdle();
-        return;
-    }
-
-    setVisualizerLive(false);
-    const { width, height, dpr } = resizeWaveformCanvas();
-    const colors = getVisualizerColors();
-    drawVisualizerBackdrop(width, height, colors);
-
-    const data = audioBuffer.getChannelData(0);
-    const columns = Math.max(160, Math.floor(width / (2 * dpr)));
-    const step = Math.max(1, Math.floor(data.length / columns));
-    const top = new Float32Array(columns);
-    const bottom = new Float32Array(columns);
-
-    for (let i = 0; i < columns; i++) {
-        let min = 1;
-        let max = -1;
-        const start = i * step;
-        const end = Math.min(data.length, start + step);
-        const sampleStride = Math.max(1, Math.floor(step / 256));
-        for (let j = start; j < end; j += sampleStride) {
-            const sample = data[j];
-            if (sample < min) min = sample;
-            if (sample > max) max = sample;
-        }
-        top[i] = max;
-        bottom[i] = min;
-    }
-
-    const center = height / 2;
-    const amplitude = height * .38;
-    const xStep = width / Math.max(1, columns - 1);
-    const fill = waveformCtx.createLinearGradient(0, center - amplitude, 0, center + amplitude);
-    fill.addColorStop(0, colors.primary);
-    fill.addColorStop(.48, colors.secondary);
-    fill.addColorStop(.52, colors.secondary);
-    fill.addColorStop(1, colors.primary);
-
-    waveformCtx.save();
-    waveformCtx.beginPath();
-    waveformCtx.moveTo(0, center - top[0] * amplitude);
-    for (let i = 1; i < columns; i++) waveformCtx.lineTo(i * xStep, center - top[i] * amplitude);
-    for (let i = columns - 1; i >= 0; i--) waveformCtx.lineTo(i * xStep, center - bottom[i] * amplitude);
-    waveformCtx.closePath();
-    waveformCtx.fillStyle = fill;
-    waveformCtx.globalAlpha = colors.light ? .62 : .72;
-    waveformCtx.shadowColor = colors.primary;
-    waveformCtx.shadowBlur = 22 * dpr;
-    waveformCtx.fill();
-    waveformCtx.restore();
-
-    waveformCtx.strokeStyle = colors.light ? 'rgba(50,45,90,.24)' : 'rgba(255,255,255,.18)';
-    waveformCtx.lineWidth = dpr;
-    waveformCtx.beginPath();
-    waveformCtx.moveTo(0, center);
-    waveformCtx.lineTo(width, center);
-    waveformCtx.stroke();
-}
-
-function visualize() {
-    if (!waveformCanvas || !waveformCtx || !analyserNode) return;
-    setVisualizerLive(true);
-
-    const frequencyData = new Uint8Array(analyserNode.frequencyBinCount);
-    const waveformData = new Uint8Array(analyserNode.frequencyBinCount);
-
-    function draw() {
-        if (!isPlaying) return;
-        animationId = requestAnimationFrame(draw);
-
-        const { width, height, dpr } = resizeWaveformCanvas();
-        const colors = getVisualizerColors();
-        analyserNode.getByteFrequencyData(frequencyData);
-        analyserNode.getByteTimeDomainData(waveformData);
-        drawVisualizerBackdrop(width, height, colors);
-
-        let bassEnergy = 0;
-        const bassBins = Math.min(24, frequencyData.length);
-        for (let i = 0; i < bassBins; i++) bassEnergy += frequencyData[i];
-        bassEnergy = bassEnergy / Math.max(1, bassBins) / 255;
-
-        const glow = waveformCtx.createRadialGradient(width * .5, height * .5, 0, width * .5, height * .5, width * .55);
-        glow.addColorStop(0, colors.secondary);
-        glow.addColorStop(1, 'transparent');
-        waveformCtx.fillStyle = glow;
-        waveformCtx.globalAlpha = .05 + bassEnergy * .15;
-        waveformCtx.fillRect(0, 0, width, height);
-        waveformCtx.globalAlpha = 1;
-
-        const barCount = Math.max(36, Math.min(92, Math.floor(width / (9 * dpr))));
-        const gap = 3 * dpr;
-        const barWidth = Math.max(2 * dpr, (width - gap * (barCount - 1)) / barCount);
-        const usableBins = Math.floor(frequencyData.length * .58);
-        const binStep = usableBins / barCount;
-        const center = height / 2;
-        const barsGradient = waveformCtx.createLinearGradient(0, center - height * .42, 0, center + height * .42);
-        barsGradient.addColorStop(0, colors.primary);
-        barsGradient.addColorStop(.5, colors.secondary);
-        barsGradient.addColorStop(1, colors.primary);
-
-        waveformCtx.save();
-        waveformCtx.fillStyle = barsGradient;
-        waveformCtx.shadowColor = colors.secondary;
-        waveformCtx.shadowBlur = 12 * dpr;
-        for (let i = 0; i < barCount; i++) {
-            const bin = Math.min(frequencyData.length - 1, Math.floor(i * binStep));
-            const value = frequencyData[bin] / 255;
-            const shaped = Math.pow(value, .72);
-            const barHeight = 3 * dpr + shaped * height * .38;
-            const x = i * (barWidth + gap);
-            waveformCtx.globalAlpha = .28 + shaped * .72;
-            waveformCtx.fillRect(x, center - barHeight, barWidth, barHeight * 2);
-        }
-        waveformCtx.restore();
-
-        const waveGradient = waveformCtx.createLinearGradient(0, 0, width, 0);
-        waveGradient.addColorStop(0, colors.primary);
-        waveGradient.addColorStop(.5, '#ffffff');
-        waveGradient.addColorStop(1, colors.secondary);
-        waveformCtx.beginPath();
-        for (let x = 0; x < width; x += Math.max(1, dpr * 2)) {
-            const index = Math.min(waveformData.length - 1, Math.floor((x / width) * waveformData.length));
-            const value = (waveformData[index] - 128) / 128;
-            const y = center + value * height * .19;
-            if (x === 0) waveformCtx.moveTo(x, y);
-            else waveformCtx.lineTo(x, y);
-        }
-        waveformCtx.strokeStyle = waveGradient;
-        waveformCtx.lineWidth = 2 * dpr;
-        waveformCtx.shadowColor = colors.primary;
-        waveformCtx.shadowBlur = 12 * dpr;
-        waveformCtx.stroke();
-        waveformCtx.shadowBlur = 0;
-    }
-
-    draw();
-}
-
-// ── Level Meter
-function startLevelMeter() {
-    if (!analyserNode) return;
-    const bufLen = analyserNode.frequencyBinCount;
-    const data   = new Float32Array(bufLen);
-    let peakHold = 0, peakHoldTime = 0, clipCount = 0;
-    meterInterval = setInterval(() => {
-        analyserNode.getFloatTimeDomainData(data);
-        let sumSq = 0, peak = 0;
-        for (let i = 0; i < bufLen; i++) { const s = Math.abs(data[i]); sumSq += data[i]*data[i]; if(s>peak)peak=s; }
-        const rms   = Math.sqrt(sumSq / bufLen);
-        const rmsDb = gainToDb(rms), peakDb = gainToDb(peak);
-        const rmsPct = Math.max(0, Math.min(100, ((rmsDb + 60) / 60) * 100));
-        const mf = document.getElementById('meterFill');
-        const rv = document.getElementById('rmsValue');
-        if (mf) mf.style.width = rmsPct + '%';
-        if (rv) rv.textContent  = rmsDb.toFixed(1) + ' dB';
-        if (peak > peakHold) { peakHold = peak; peakHoldTime = Date.now(); }
-        if (Date.now() - peakHoldTime > 1000) peakHold *= 0.95;
-        const pkPct = Math.max(0, Math.min(100, ((gainToDb(peakHold) + 60) / 60) * 100));
-        const mp = document.getElementById('meterPeak'); const pv = document.getElementById('peakValue');
-        if (mp) mp.style.left = pkPct + '%';
-        if (pv) pv.textContent = gainToDb(peakHold).toFixed(1) + ' dB';
-        const ci = document.getElementById('clipIndicator');
-        if (peakDb > -1) { if(ci)ci.classList.add('active'); clipCount++; }
-        else { if(ci)ci.classList.remove('active'); if(clipCount>0)clipCount--; }
-    }, 50);
-}
-function stopLevelMeter() {
-    if (meterInterval) { clearInterval(meterInterval); meterInterval = null; }
-    const mf=document.getElementById('meterFill'); const mp=document.getElementById('meterPeak');
-    const pv=document.getElementById('peakValue'); const rv=document.getElementById('rmsValue');
-    if(mf)mf.style.width='0%'; if(mp)mp.style.left='0%';
-    if(pv)pv.textContent='-∞ dB'; if(rv)rv.textContent='-∞ dB';
-}
-
-// ── Presets
-const presets = {
-    normal:       { label:'Normal',       speed:1.00, pitch: 0.0, volume:100, bass: 0, treble: 0, pan:  0, reverb: 0, echo: 0, eightD:false, colors:['#8b5cf6','#22d3ee'] },
-    nightcore:    { label:'Nightcore',    speed:1.30, pitch: 3.0, volume:100, bass: 1, treble: 6, pan:  0, reverb: 8, echo: 0, eightD:false, colors:['#ff56c7','#22d3ee'] },
-    deepbass:     { label:'Deep Bass',    speed:0.90, pitch:-3.0, volume:110, bass:15, treble:-5,pan:  0, reverb:10, echo: 5, eightD:false, colors:['#7c3aed','#f43f5e'] },
-    '8daudio':    { label:'8D Orbit',      speed:1.00, pitch: 0.0, volume:100, bass: 3, treble: 2, pan:  0, reverb:24, echo:15, eightD:true,  colors:['#06b6d4','#8b5cf6'] },
-    concert:      { label:'Concert Hall',  speed:1.00, pitch: 0.0, volume:103, bass: 7, treble: 4, pan:  0, reverb:58, echo:20, eightD:false, colors:['#f59e0b','#ec4899'] },
-    slowcore:     { label:'Slowcore',      speed:0.72, pitch:-2.0, volume:100, bass: 5, treble:-2,pan:  0, reverb:62, echo:12, eightD:false, colors:['#6366f1','#94a3b8'] },
-    lofi:         { label:'Lo-Fi',         speed:0.92, pitch:-1.0, volume: 95, bass: 7, treble:-5,pan: -6, reverb:25, echo: 8, eightD:false, colors:['#f59e0b','#84cc16'] },
-    vaporwave:    { label:'Vaporwave',     speed:0.80, pitch:-4.0, volume:100, bass: 5, treble: 0, pan: 12, reverb:48, echo:18, eightD:false, colors:['#ff56c7','#22d3ee'] },
-    phonecall:    { label:'Phone Call',    speed:1.00, pitch: 2.0, volume: 96, bass: 0, treble: 9, pan:  0, reverb: 3, echo: 0, eightD:false, colors:['#10b981','#facc15'] },
-    underwater:   { label:'Underwater',    speed:0.85, pitch:-5.0, volume:100, bass:10, treble:-9,pan: -8, reverb:78, echo:30, eightD:false, colors:['#0284c7','#22d3ee'] },
-    hyperpop:     { label:'Hyperpop',      speed:1.15, pitch: 4.0, volume:104, bass: 4, treble:10, pan:  0, reverb:16, echo: 0, eightD:false, colors:['#f43f5e','#a855f7'] },
-    cinematic:    { label:'Cinematic',     speed:0.92, pitch:-2.0, volume:105, bass:11, treble: 3, pan:  0, reverb:55, echo: 0, eightD:false, colors:['#f97316','#7c3aed'] },
-    dreamscape:   { label:'Dreamscape',    speed:0.82, pitch:-3.0, volume: 94, bass: 3, treble: 2, pan: 10, reverb:74, echo: 0, eightD:false, colors:['#818cf8','#f0abfc'] },
-    cathedral:    { label:'Cathedral',     speed:1.00, pitch: 0.0, volume:100, bass: 2, treble: 5, pan:  0, reverb:92, echo: 0, eightD:false, colors:['#fbbf24','#a78bfa'] },
-    subterranean: { label:'Subterranean',  speed:0.68, pitch:-7.0, volume:112, bass:20, treble:-10,pan: 0, reverb:18, echo: 0, eightD:false, colors:['#ef4444','#581c87'] },
-    crystal:      { label:'Crystal',       speed:1.05, pitch: 5.0, volume: 96, bass: 0, treble:13, pan:  6, reverb:34, echo: 0, eightD:false, colors:['#67e8f9','#c4b5fd'] },
-    alienradio:   { label:'Alien Radio',   speed:1.10, pitch: 7.0, volume: 98, bass: 1, treble:11, pan:-18, reverb:14, echo: 0, eightD:true,  colors:['#84cc16','#22d3ee'] },
-    tapewarmth:   { label:'Tape Warmth',   speed:0.96, pitch:-0.5, volume: 97, bass: 6, treble:-4,pan: -4, reverb:12, echo: 0, eightD:false, colors:['#fb923c','#eab308'] },
-    slowedreverb: { label:'Slowed + Reverb', speed:0.85, pitch: 0.0, volume:100, bass: 0, treble: 0, pan: 0, reverb:50, echo: 0, eightD:false, colors:['#8b5cf6','#38bdf8'] },
-    softslowed:   { label:'Soft Slowed',      speed:0.92, pitch: 0.0, volume:100, bass: 0, treble: 0, pan: 0, reverb:30, echo: 0, eightD:false, colors:['#a78bfa','#67e8f9'] },
-    deepslowed:   { label:'Deep Slowed',      speed:0.75, pitch: 0.0, volume:100, bass: 0, treble: 0, pan: 0, reverb:65, echo: 0, eightD:false, colors:['#6366f1','#0ea5e9'] },
-    ultraslowed:  { label:'Ultra Slowed',     speed:0.65, pitch: 0.0, volume:100, bass: 0, treble: 0, pan: 0, reverb:82, echo: 0, eightD:false, colors:['#4f46e5','#7dd3fc'] }
-};
-
-function formatPanValue(value) {
-    const absolute = Math.abs(value).toFixed(1);
-    if (value === 0) return 'Center';
-    return value < 0 ? absolute + '% Left' : absolute + '% Right';
-}
-
-function updateRangeFill(slider) {
-    if (!slider) return;
-    const min = parseFloat(slider.min) || 0;
-    const max = parseFloat(slider.max) || 100;
-    const value = parseFloat(slider.value);
-    const progress = max === min ? 0 : ((value - min) / (max - min)) * 100;
-    slider.style.setProperty('--range-progress', progress.toFixed(2) + '%');
-}
-
-function updateAllRangeFills() {
-    document.querySelectorAll('input[type="range"]').forEach(updateRangeFill);
-}
-
-function markPresetCustom() {
-    if (isApplyingPreset || currentPresetName === 'custom') return;
-    currentPresetName = 'custom';
-    if (activePresetNameEl) activePresetNameEl.textContent = 'Custom';
-    document.querySelectorAll('.preset-btn').forEach(btn => {
-        btn.classList.remove('active');
-        btn.setAttribute('aria-pressed', 'false');
+  function normalizeEffects(input) {
+    const defaults = defaultEffects();
+    const source = input && typeof input === 'object' ? input : {};
+    Object.keys(defaults).forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(source, key) && source[key] !== undefined) defaults[key] = JSON.parse(JSON.stringify(source[key]));
     });
-}
+    return defaults;
+  }
 
-function setActivePreset(presetName, preset) {
-    currentPresetName = presetName;
-    if (activePresetNameEl) activePresetNameEl.textContent = preset.label;
-    document.querySelectorAll('.preset-btn').forEach(btn => {
-        const isActive = btn.dataset.preset === presetName;
-        btn.classList.toggle('active', isActive);
-        btn.setAttribute('aria-pressed', String(isActive));
-    });
+  function formatTime(seconds, precise) {
+    const value = Math.max(0, Number(seconds) || 0);
+    const minutes = Math.floor(value / 60);
+    const wholeSeconds = Math.floor(value % 60);
+    if (!precise) return `${minutes}:${String(wholeSeconds).padStart(2, '0')}`;
+    const milliseconds = Math.floor((value % 1) * 1000);
+    return `${minutes}:${String(wholeSeconds).padStart(2, '0')}.${String(milliseconds).padStart(3, '0')}`;
+  }
 
-    document.documentElement.style.setProperty('--vibe-primary', preset.colors[0]);
-    document.documentElement.style.setProperty('--vibe-secondary', preset.colors[1]);
-    document.body.dataset.vibe = presetName;
+  function showMessage(text, type, timeout) {
+    const element = $('appMessage');
+    if (!element) return;
+    element.hidden = !text;
+    element.textContent = text || '';
+    element.dataset.type = type || 'info';
+    clearTimeout(showMessage.timer);
+    if (text && timeout !== 0) showMessage.timer = setTimeout(() => { element.hidden = true; }, timeout || 5000);
+  }
 
-    if (presetToastNameEl) presetToastNameEl.textContent = preset.label;
-    if (presetToast) {
-        clearTimeout(presetToastTimer);
-        presetToast.classList.remove('visible');
-        requestAnimationFrame(() => presetToast.classList.add('visible'));
-        presetToastTimer = setTimeout(() => presetToast.classList.remove('visible'), 1500);
-    }
+  function setProcessing(active, text, percent) {
+    state.loading = active && !state.exporting;
+    const overlay = $('processingOverlay');
+    overlay.hidden = !active;
+    $('processingText').textContent = text || 'Processing audio...';
+    $('processingProgress').value = Number.isFinite(percent) ? percent : 0;
+    document.body.classList.toggle('is-processing', active);
+  }
 
-    document.body.classList.remove('preset-switching');
-    requestAnimationFrame(() => {
-        document.body.classList.add('preset-switching');
-        setTimeout(() => document.body.classList.remove('preset-switching'), 720);
-    });
-}
+  function nativeToData(buffer) {
+    return { sampleRate: buffer.sampleRate, channels: Array.from({ length: buffer.numberOfChannels }, (_, index) => new Float32Array(buffer.getChannelData(index))) };
+  }
 
-function setPresetsExpanded(expanded) {
-    if (!presetsSection || !presetToggle || !presetPanel) return;
-    presetsSection.classList.toggle('presets-open', expanded);
-    presetToggle.setAttribute('aria-expanded', String(expanded));
-    presetPanel.setAttribute('aria-hidden', String(!expanded));
-    presetPanel.toggleAttribute('inert', !expanded);
-    if (presetToggleLabel) presetToggleLabel.textContent = expanded ? 'Hide presets' : 'Show presets';
-}
+  function dataToNative(data) {
+    Core.assertBufferData(data);
+    const context = engine.context.rawContext;
+    const buffer = context.createBuffer(data.channels.length, data.channels[0].length, data.sampleRate);
+    data.channels.forEach((channel, index) => buffer.copyToChannel(channel, index));
+    return buffer;
+  }
 
-function filterPresets(filterName) {
-    document.querySelectorAll('.preset-filter').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.filter === filterName);
-    });
-    document.querySelectorAll('.preset-btn').forEach((btn, index) => {
-        const shouldShow = filterName === 'all' || btn.dataset.category === filterName;
-        btn.classList.toggle('is-hidden', !shouldShow);
-        if (shouldShow) btn.style.setProperty('--reveal-delay', (index % 6) * 35 + 'ms');
-    });
-}
+  function currentDuration() { return state.workingData ? Core.bufferDuration(state.workingData) : 0; }
+  function playbackDuration() {
+    return state.compareMode === 'original' && state.originalBuffer ? state.originalBuffer.duration : currentDuration();
+  }
 
-function applyPreset(preset, presetName = 'normal') {
-    isApplyingPreset = true;
+  function currentSnapshot(label) {
+    return { buffer: state.workingData, selection: state.selection, playhead: state.playhead, label: label || '' };
+  }
 
-    setPlaybackSpeed(preset.speed);
-    document.getElementById('pitchSlider').value  = preset.pitch;
-    document.getElementById('pitchValue').textContent = preset.pitch.toFixed(1) + ' st';
-    document.getElementById('volumeSlider').value = preset.volume;
-    document.getElementById('volumeValue').textContent = preset.volume.toFixed(1) + '%';
-    document.getElementById('bassSlider').value   = preset.bass;
-    document.getElementById('bassValue').textContent  = preset.bass.toFixed(1) + ' dB';
-    document.getElementById('trebleSlider').value = preset.treble;
-    document.getElementById('trebleValue').textContent = preset.treble.toFixed(1) + ' dB';
-    document.getElementById('panSlider').value    = preset.pan;
-    document.getElementById('panValue').textContent = formatPanValue(preset.pan);
-    document.getElementById('reverbSlider').value = preset.reverb;
-    document.getElementById('reverbValue').textContent = preset.reverb.toFixed(1) + '%';
-    document.getElementById('echoSlider').value = preset.echo;
-    document.getElementById('echoValue').textContent = preset.echo.toFixed(1) + '%';
+  function restoreSnapshot(snapshot) {
+    if (!snapshot) return;
+    engine.stop();
+    state.workingData = Core.cloneBufferData(snapshot.buffer);
+    state.workingBuffer = dataToNative(state.workingData);
+    state.selection = Core.normalizeSelection(snapshot.selection, currentDuration());
+    state.playhead = Core.clamp(snapshot.playhead, 0, currentDuration());
+    engine.setWorkingBuffer(state.workingBuffer);
+    updateAfterBufferChange();
+  }
 
-    if (toneGain)       toneGain.gain.value         = preset.volume / 100;
-    if (toneBass)       toneBass.gain.value          = preset.bass;
-    if (toneTreble)     toneTreble.gain.value        = preset.treble;
-    if (tonePan && !preset.eightD) tonePan.pan.value = preset.pan / 100;
-    if (toneDelay) {
-        toneDelay.wet.value = preset.echo / 100;
-        toneDelay.feedback.value = Math.min(0.55, preset.echo / 100 * 0.5);
-    }
-    if (toneReverb && toneReverbReady) toneReverb.wet.value = preset.reverb / 100;
-    setRealtimePitch(preset.pitch);
+  function setWorkingData(data, selection, playhead) {
+    Core.assertBufferData(data);
+    engine.stop();
+    state.workingData = data;
+    state.workingBuffer = dataToNative(data);
+    state.selection = Core.normalizeSelection(selection, Core.bufferDuration(data));
+    state.playhead = Core.clamp(playhead, 0, Core.bufferDuration(data));
+    engine.setWorkingBuffer(state.workingBuffer);
+    updateAfterBufferChange();
+  }
 
-    if (preset.eightD && !eightDEnabled)      eightDToggle.click();
-    else if (!preset.eightD && eightDEnabled) eightDToggle.click();
-
-    updateAllRangeFills();
-    syncProgressUI();
-    setActivePreset(presetName, preset);
-    isApplyingPreset = false;
-}
-
-function initializeInteractiveDesign() {
-    updateAllRangeFills();
-
-    document.querySelectorAll('input[type="range"]').forEach(slider => {
-        slider.addEventListener('input', () => {
-            updateRangeFill(slider);
-            markPresetCustom();
-        });
-    });
-
-    const finePointer = window.matchMedia('(pointer: fine)').matches;
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    if (finePointer && !reducedMotion) {
-        document.addEventListener('pointermove', event => {
-            lastPointerX = event.clientX;
-            lastPointerY = event.clientY;
-            if (pointerRafId) return;
-            pointerRafId = requestAnimationFrame(() => {
-                document.documentElement.style.setProperty('--pointer-x', lastPointerX + 'px');
-                document.documentElement.style.setProperty('--pointer-y', lastPointerY + 'px');
-                pointerRafId = null;
-            });
-        });
-
-        document.querySelectorAll('.control-group, .preset-btn').forEach(card => {
-            card.addEventListener('pointermove', event => {
-                const rect = card.getBoundingClientRect();
-                const x = (event.clientX - rect.left) / rect.width;
-                const y = (event.clientY - rect.top) / rect.height;
-                card.style.setProperty('--glow-x', (x * 100).toFixed(1) + '%');
-                card.style.setProperty('--glow-y', (y * 100).toFixed(1) + '%');
-                card.style.setProperty('--tilt-x', ((0.5 - y) * 5).toFixed(2) + 'deg');
-                card.style.setProperty('--tilt-y', ((x - 0.5) * 6).toFixed(2) + 'deg');
-            });
-            card.addEventListener('pointerleave', () => {
-                card.style.setProperty('--tilt-x', '0deg');
-                card.style.setProperty('--tilt-y', '0deg');
-            });
-        });
-    }
-}
-
-// ── Export / Download
-async function handleDownload() {
-    if (!audioBuffer) { alert('Load an audio file first.'); return; }
-
-    const formatInputs = Array.from(document.querySelectorAll('input[name="exportFormat"]'));
-    const selectedFormat = formatInputs.find(input => input.checked);
-    const exportFormat = selectedFormat ? selectedFormat.value : 'wav';
-
+  function performEdit(label, operation) {
+    if (!state.workingData) return showMessage('Load an audio file first.', 'error');
     try {
-        downloadBtn.querySelector('span').textContent = 'Rendering...';
-        downloadBtn.disabled = true;
-        formatInputs.forEach(input => { input.disabled = true; });
+      const previous = currentSnapshot(label);
+      const result = operation();
+      if (!result || !result.buffer) throw new Error('The edit did not produce audio.');
+      state.history.push(previous);
+      setWorkingData(result.buffer, result.selection, result.playhead);
+      updateHistoryButtons();
+      showMessage(`${label} applied.`, 'success', 2500);
+    } catch (error) {
+      showMessage(error.message || `Could not apply ${label}.`, 'error');
+    }
+  }
 
-        const pitch = getPitchSemitones();
-        const speed = getSpeedValue();
-        const sr    = audioBuffer.sampleRate;
-        const nCh   = audioBuffer.numberOfChannels;
+  async function performHeavyEdit(label, operation) {
+    setProcessing(true, `${label}...`, 25);
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+    try { performEdit(label, operation); } finally { setProcessing(false); }
+  }
 
-        let pitchedBuf;
-        if (Math.abs(pitch) < 0.01) {
-            pitchedBuf = audioBuffer;
-        } else {
-            const ratio     = Math.pow(2, pitch / 12);
-            const frameSize = 2048;
-            const hopOut    = 512;
-            const hopIn     = hopOut * ratio;
-            const inLen     = audioBuffer.length;
-            const outLen    = Math.ceil(inLen / ratio);
-            const win       = new Float32Array(frameSize);
-            for (let i = 0; i < frameSize; i++)
-                win[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (frameSize - 1)));
-            const outs = Array.from({length: nCh}, () => new Float32Array(outLen));
-            for (let ch = 0; ch < nCh; ch++) {
-                const inp = audioBuffer.getChannelData(ch), out = outs[ch];
-                let inPos = 0, outPos = 0;
-                while (outPos + frameSize <= outLen) {
-                    const base = Math.round(inPos);
-                    for (let i = 0; i < frameSize; i++) {
-                        const s = base + i;
-                        out[outPos + i] += (s < inLen ? inp[s] : 0) * win[i];
-                    }
-                    inPos += hopIn; outPos += hopOut;
-                }
-            }
-            const stretched = audioContext.createBuffer(nCh, outLen, sr);
-            for (let ch = 0; ch < nCh; ch++) stretched.getChannelData(ch).set(outs[ch]);
-            const oCtx  = new OfflineAudioContext(nCh, inLen, sr);
-            const oSrc  = oCtx.createBufferSource();
-            oSrc.buffer = stretched;
-            oSrc.playbackRate.value = ratio;
-            oSrc.connect(oCtx.destination);
-            oSrc.start(0);
-            pitchedBuf = await oCtx.startRendering();
-        }
+  function updateHistoryButtons() {
+    $('undoBtn').disabled = !state.history.canUndo;
+    $('redoBtn').disabled = !state.history.canRedo;
+  }
 
-        const echoV = parseFloat(document.getElementById('echoSlider').value) / 100;
-        const revV = parseFloat(document.getElementById('reverbSlider').value) / 100;
-        const tailSeconds = Math.max(revV > 0 ? 2.25 : 0, echoV > 0 ? 3 : 0);
-        const finalLen = Math.ceil(pitchedBuf.length / speed + tailSeconds * sr);
-        const OfflineContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-        const offCtx = new OfflineContext(2, finalLen, sr);
-        const src      = offCtx.createBufferSource();
-        src.buffer     = pitchedBuf;
-        src.playbackRate.value = speed;
+  function updateAfterBufferChange() {
+    waveformCacheKey = '';
+    $('totalTime').textContent = formatTime(playbackDuration());
+    $('fileDuration').textContent = formatTime(currentDuration());
+    updateProgress(state.playhead);
+    updateSelectionUI();
+    resizeWaveform();
+    scheduleSilenceAnalysis();
+  }
 
-        const bass   = offCtx.createBiquadFilter(); bass.type='lowshelf';  bass.frequency.value=200;  bass.gain.value=parseFloat(document.getElementById('bassSlider').value);
-        const treble = offCtx.createBiquadFilter(); treble.type='highshelf'; treble.frequency.value=3000; treble.gain.value=parseFloat(document.getElementById('trebleSlider').value);
-        const pan    = offCtx.createStereoPanner ? offCtx.createStereoPanner() : null;
-        if (pan && !eightDEnabled) pan.pan.value = parseFloat(document.getElementById('panSlider').value) / 100;
-        const gainN  = offCtx.createGain(); gainN.gain.value = parseFloat(document.getElementById('volumeSlider').value) / 100;
+  function updateProgress(time) {
+    const duration = playbackDuration();
+    state.playhead = Core.clamp(time, 0, duration);
+    const percent = duration ? state.playhead / duration * 100 : 0;
+    $('progressFill').style.width = `${percent}%`;
+    $('progressThumb').style.left = `${percent}%`;
+    $('currentTime').textContent = formatTime(state.playhead);
+    drawWaveform();
+  }
 
-        const delay = offCtx.createDelay(5.0); delay.delayTime.value = 0.3;
-        const delayFeedback = offCtx.createGain(); delayFeedback.gain.value = Math.min(0.55, echoV * 0.5);
-        const echoWet = offCtx.createGain(); echoWet.gain.value = echoV;
-        const echoBus = offCtx.createGain();
+  function setPlayIcon(playing) {
+    $('playIcon').hidden = playing;
+    $('pauseIcon').hidden = !playing;
+    $('playBtn').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+  }
 
-        const conv   = offCtx.createConvolver();
-        const rDry   = offCtx.createGain();
-        const rWet   = offCtx.createGain();
-        rDry.gain.value = 1 - revV; rWet.gain.value = revV * 0.6;
-        const rLen   = sr * 2;
-        const rImp   = offCtx.createBuffer(2, rLen, sr);
-        for (let c = 0; c < 2; c++) {
-            const d = rImp.getChannelData(c);
-            for (let i = 0; i < rLen; i++) d[i] = (Math.random()*2-1) * Math.pow((rLen-i)/rLen, Math.max(0.001, revV*20));
-        }
-        conv.buffer = rImp;
+  function playbackLoop() {
+    cancelAnimationFrame(state.animationFrame);
+    const tick = () => {
+      if (!engine.playing) { setPlayIcon(false); return; }
+      const offset = engine.currentOffset();
+      updateProgress(offset);
+      keepPlayheadVisible();
+      if (offset >= playbackDuration() - 0.01) {
+        engine.stop();
+        updateProgress(0);
+        setPlayIcon(false);
+        return;
+      }
+      state.animationFrame = requestAnimationFrame(tick);
+    };
+    state.animationFrame = requestAnimationFrame(tick);
+  }
 
-        const comp = offCtx.createDynamicsCompressor();
-        comp.threshold.value=-3; comp.knee.value=6; comp.ratio.value=12; comp.attack.value=0.003; comp.release.value=0.25;
-        const outG = offCtx.createGain(); outG.gain.value = 0.944;
+  async function togglePlayback() {
+    if (!state.workingBuffer) return showMessage('Load an audio file first.', 'error');
+    try {
+      if (engine.playing) {
+        state.playhead = engine.pause();
+        setPlayIcon(false);
+        updateProgress(state.playhead);
+      } else {
+        if (state.playhead >= playbackDuration() - 0.01) state.playhead = 0;
+        await engine.play(state.playhead);
+        setPlayIcon(true);
+        playbackLoop();
+      }
+    } catch (error) {
+      setPlayIcon(false);
+      showMessage(error.message || 'Audio playback could not start.', 'error', 0);
+    }
+  }
 
-        src.connect(bass); bass.connect(treble); treble.connect(pan||gainN);
-        if (pan) pan.connect(gainN);
+  function seekTo(time, resume) {
+    const wasPlaying = engine.playing;
+    engine.stop(false);
+    updateProgress(Core.clamp(time, 0, playbackDuration()));
+    engine.startedOffset = state.playhead;
+    if (resume || wasPlaying) engine.play(state.playhead).then(() => { setPlayIcon(true); playbackLoop(); }).catch((error) => showMessage(error.message, 'error'));
+  }
 
-        gainN.connect(echoBus);
-        if (echoV > 0) {
-            gainN.connect(delay);
-            delay.connect(delayFeedback);
-            delayFeedback.connect(delay);
-            delay.connect(echoWet);
-            echoWet.connect(echoBus);
-        }
+  function compare(mode) {
+    if (!state.workingBuffer) return;
+    const wasPlaying = engine.playing;
+    const position = wasPlaying ? engine.currentOffset() : state.playhead;
+    engine.stop(false);
+    state.compareMode = mode === 'original' ? 'original' : 'modified';
+    engine.setCompareMode(state.compareMode);
+    $('compareOriginalBtn').classList.toggle('active', state.compareMode === 'original');
+    $('compareModifiedBtn').classList.toggle('active', state.compareMode === 'modified');
+    $('compareOriginalBtn').setAttribute('aria-pressed', String(state.compareMode === 'original'));
+    $('compareModifiedBtn').setAttribute('aria-pressed', String(state.compareMode === 'modified'));
+    $('totalTime').textContent = formatTime(playbackDuration());
+    updateProgress(Math.min(position, playbackDuration()));
+    if (wasPlaying) engine.play(state.playhead).then(playbackLoop).catch((error) => showMessage(error.message, 'error'));
+  }
 
-        const merger = offCtx.createGain();
-        echoBus.connect(rDry); rDry.connect(merger);
-        if (revV > 0) { echoBus.connect(conv); conv.connect(rWet); rWet.connect(merger); }
-        merger.connect(comp); comp.connect(outG); outG.connect(offCtx.destination);
-        src.start(0);
+  function resizeWaveform() {
+    if (!canvas || !state.workingData) return;
+    const scroll = $('waveformScroll');
+    const logicalWidth = Math.max(scroll.clientWidth || 300, Math.round((scroll.clientWidth || 300) * state.zoom));
+    const logicalHeight = Math.max(180, Math.min(260, Math.round(logicalWidth * 0.18)));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    $('waveformStage').style.width = `${logicalWidth}px`;
+    canvas.style.width = `${logicalWidth}px`;
+    canvas.style.height = `${logicalHeight}px`;
+    canvas.width = Math.round(logicalWidth * dpr);
+    canvas.height = Math.round(logicalHeight * dpr);
+    canvasContext.setTransform(dpr, 0, 0, dpr, 0, 0);
+    waveformCacheKey = '';
+    drawWaveform();
+  }
 
-        let rendered = await offCtx.startRendering();
+  function buildWaveformBase(width, height) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    waveformBaseCanvas = document.createElement('canvas');
+    waveformBaseCanvas.width = Math.round(width * dpr);
+    waveformBaseCanvas.height = Math.round(height * dpr);
+    const context = waveformBaseCanvas.getContext('2d');
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const channels = state.workingData.channels;
+    const samples = channels[0].length;
+    const center = height / 2;
+    const pixels = Math.max(1, Math.floor(width));
+    const step = samples / pixels;
+    const gradient = context.createLinearGradient(0, 0, width, 0);
+    gradient.addColorStop(0, '#8b5cf6'); gradient.addColorStop(.5, '#22d3ee'); gradient.addColorStop(1, '#ec4899');
+    context.strokeStyle = gradient;
+    context.lineWidth = Math.max(1, 1.15 / Math.sqrt(state.zoom));
+    context.beginPath();
+    for (let x = 0; x < pixels; x++) {
+      const start = Math.floor(x * step);
+      const end = Math.min(samples, Math.max(start + 1, Math.floor((x + 1) * step)));
+      let min = 1; let max = -1;
+      const scanStep = Math.max(1, Math.floor((end - start) / 120));
+      for (let frame = start; frame < end; frame += scanStep) {
+        let sample = 0;
+        for (let channel = 0; channel < channels.length; channel++) sample += channels[channel][frame] / channels.length;
+        min = Math.min(min, sample); max = Math.max(max, sample);
+      }
+      context.moveTo(x + .5, center + min * center * .88);
+      context.lineTo(x + .5, center + max * center * .88);
+    }
+    context.stroke();
+    waveformCacheKey = `${width}:${height}:${state.zoom}:${state.workingData.channels[0].length}:${state.workingData.sampleRate}`;
+  }
 
-        let maxP = 0;
-        for (let c = 0; c < rendered.numberOfChannels; c++) {
-            const d = rendered.getChannelData(c);
-            for (let i = 0; i < d.length; i++) if (Math.abs(d[i]) > maxP) maxP = Math.abs(d[i]);
-        }
-        if (maxP > 0.05 && maxP < 1.5) {
-            const ng = 0.944 / maxP;
-            for (let c = 0; c < rendered.numberOfChannels; c++) {
-                const d = rendered.getChannelData(c);
-                for (let i = 0; i < d.length; i++) d[i] = Math.max(-1, Math.min(1, d[i] * ng));
-            }
-        }
+  function drawWaveform() {
+    if (!canvasContext || !canvas) return;
+    const width = parseFloat(canvas.style.width) || canvas.clientWidth;
+    const height = parseFloat(canvas.style.height) || canvas.clientHeight;
+    canvasContext.clearRect(0, 0, width, height);
+    canvasContext.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--surface-waveform').trim() || 'rgba(9,10,18,.75)';
+    canvasContext.fillRect(0, 0, width, height);
+    if (!state.workingData) return;
+    const selection = Core.normalizeSelection(state.selection, currentDuration());
+    if (selection) {
+      const start = Core.timeToX(selection.start, currentDuration(), width);
+      const end = Core.timeToX(selection.end, currentDuration(), width);
+      canvasContext.fillStyle = 'rgba(139,92,246,.22)';
+      canvasContext.fillRect(start, 0, end - start, height);
+      canvasContext.strokeStyle = 'rgba(167,139,250,.9)';
+      canvasContext.lineWidth = 1;
+      canvasContext.strokeRect(start + .5, .5, Math.max(0, end - start - 1), height - 1);
+    }
+    const key = `${width}:${height}:${state.zoom}:${state.workingData.channels[0].length}:${state.workingData.sampleRate}`;
+    if (!waveformBaseCanvas || waveformCacheKey !== key) buildWaveformBase(width, height);
+    canvasContext.drawImage(waveformBaseCanvas, 0, 0, waveformBaseCanvas.width, waveformBaseCanvas.height, 0, 0, width, height);
+    const playheadX = Core.timeToX(Math.min(state.playhead, currentDuration()), currentDuration(), width);
+    canvasContext.strokeStyle = '#ffffff'; canvasContext.lineWidth = 1.5;
+    canvasContext.beginPath(); canvasContext.moveTo(playheadX, 0); canvasContext.lineTo(playheadX, height); canvasContext.stroke();
+    canvasContext.fillStyle = '#ffffff'; canvasContext.beginPath(); canvasContext.arc(playheadX, 7, 4, 0, Math.PI * 2); canvasContext.fill();
+  }
 
-        const fx = [];
-        if (speed !== 1.0) fx.push(speed + 'x');
-        if (pitch !== 0) fx.push((pitch > 0 ? '+' : '') + pitch + 'st');
-        if (revV > 0) fx.push('reverb');
-        if (echoV > 0) fx.push('echo');
+  function pointerTime(event) {
+    const rect = canvas.getBoundingClientRect();
+    return Core.xToTime(event.clientX - rect.left, currentDuration(), rect.width);
+  }
 
-        let outputBlob;
-        let extension;
-        if (exportFormat.startsWith('mp3-')) {
-            const bitrate = parseInt(exportFormat.split('-')[1], 10) || 320;
-            downloadBtn.querySelector('span').textContent = 'Preparing MP3...';
-            const mp3Buffer = await resampleAudioBuffer(rendered, 44100);
-            outputBlob = await audioBufferToMp3(mp3Buffer, bitrate);
-            extension = 'mp3';
-        } else {
-            outputBlob = new Blob([audioBufferToWav(rendered)], { type: 'audio/wav' });
-            extension = 'wav';
-        }
+  function updateSelectionUI() {
+    const selection = Core.normalizeSelection(state.selection, currentDuration());
+    $('selectionStart').textContent = formatTime(selection ? selection.start : 0, true);
+    $('selectionEnd').textContent = formatTime(selection ? selection.end : 0, true);
+    $('selectionDuration').textContent = formatTime(selection ? selection.duration : 0, true);
+    $('clearSelectionBtn').disabled = !selection;
+    ['trimBtn', 'cutBtn', 'copyBtn', 'deleteBtn'].forEach((id) => { $(id).disabled = !selection; });
+    $('pasteBtn').disabled = !state.clipboard;
+    drawWaveform();
+  }
 
-        const baseName = currentFileName.replace(/\.[^/.]+$/, '');
-        const fileName = 'edited_' + baseName + (fx.length ? '_' + fx.join('_') : '') + '.' + extension;
-        downloadBlob(outputBlob, fileName);
-    } catch(err) {
-        console.error('Export error:', err);
-        alert('Export failed: ' + err.message);
+  function keepPlayheadVisible() {
+    if (state.zoom <= 1) return;
+    const scroll = $('waveformScroll');
+    const stageWidth = $('waveformStage').clientWidth;
+    const x = Core.timeToX(state.playhead, currentDuration(), stageWidth);
+    const leftGuard = scroll.scrollLeft + scroll.clientWidth * .18;
+    const rightGuard = scroll.scrollLeft + scroll.clientWidth * .82;
+    if (x < leftGuard || x > rightGuard) scroll.scrollTo({ left: Math.max(0, x - scroll.clientWidth * .35), behavior: 'smooth' });
+  }
+
+  function updateZoom(value) {
+    state.zoom = Core.clamp(value, 1, 12);
+    $('zoomValue').textContent = `${Math.round(state.zoom * 100)}%`;
+    resizeWaveform();
+    keepPlayheadVisible();
+  }
+
+  function updateRangeFill(input) {
+    if (!input || input.type !== 'range') return;
+    const min = Number(input.min); const max = Number(input.max); const value = Number(input.value);
+    input.style.setProperty('--range-progress', `${max === min ? 0 : (value - min) / (max - min) * 100}%`);
+  }
+
+  function formatPan(value) { return value === 0 ? 'Center' : `${Math.abs(value)}% ${value < 0 ? 'Left' : 'Right'}`; }
+
+  const EFFECT_BINDINGS = [
+    ['speedSlider', 'speed', 'speedValue', (v) => `${v.toFixed(2)}x · ${Math.round(v * 100)}%`, 'transport'],
+    ['pitchSlider', 'pitch', 'pitchValue', (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} st`, 'transport'],
+    ['fineTuneSlider', 'fineTune', 'fineTuneValue', (v) => `${v > 0 ? '+' : ''}${Math.round(v)} cents`, 'transport'],
+    ['volumeSlider', 'volume', 'volumeValue', (v) => `${Math.round(v)}%`, 'basic'],
+    ['gainSlider', 'gainDb', 'gainValue', (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`, 'basic'],
+    ['bassSlider', 'bass', 'bassValue', (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`, 'basic'],
+    ['midSlider', 'mid', 'midValue', (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`, 'basic'],
+    ['trebleSlider', 'treble', 'trebleValue', (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`, 'basic'],
+    ['reverbSlider', 'reverb', 'reverbValue', (v) => `${Math.round(v)}%`, 'basic'],
+    ['echoSlider', 'echo', 'echoValue', (v) => `${Math.round(v)}%`, 'basic'],
+    ['panSlider', 'pan', 'panValue', formatPan, 'basic'],
+    ['eightDSpeed', 'eightDSpeed', 'eightDSpeedValue', (v) => v.toFixed(1), 'basic'],
+    ['vocalBoostSlider', 'vocalBoost', 'vocalBoostValue', (v) => `${Math.round(v)}%`, 'advanced'],
+    ['stereoWidthSlider', 'stereoWidth', 'stereoWidthValue', (v) => `${Math.round(v)}%`, 'advanced'],
+    ['distortionDriveSlider', 'distortionDrive', 'distortionDriveValue', (v) => `${Math.round(v)}%`, 'advanced'],
+    ['distortionMixSlider', 'distortionMix', 'distortionMixValue', (v) => `${Math.round(v)}%`, 'advanced'],
+    ['highPassFrequency', 'highPassFrequency', 'highPassFrequencyValue', (v) => `${Math.round(v)} Hz`, 'advanced'],
+    ['lowPassFrequency', 'lowPassFrequency', 'lowPassFrequencyValue', (v) => `${Math.round(v)} Hz`, 'advanced'],
+    ['compressorThreshold', 'compressorThreshold', 'compressorThresholdValue', (v) => `${Math.round(v)} dB`, 'advanced'],
+    ['compressorRatio', 'compressorRatio', 'compressorRatioValue', (v) => `${v.toFixed(1)}:1`, 'advanced'],
+  ];
+
+  function markCustom(section) {
+    state.lastSection = section || state.lastSection;
+    state.activePreset = 'custom';
+    $('activePresetName').textContent = 'Custom';
+    document.querySelectorAll('.preset-btn').forEach((button) => { button.classList.remove('active'); button.setAttribute('aria-pressed', 'false'); });
+  }
+
+  function scheduleTransportRestart() {
+    if (!engine.playing) { engine.setEffectState(state.effects); return; }
+    clearTimeout(state.transportRestartTimer);
+    state.transportRestartTimer = setTimeout(async () => {
+      const position = engine.currentOffset();
+      engine.pause();
+      engine.setEffectState(state.effects);
+      try { await engine.play(position); playbackLoop(); } catch (error) { showMessage(error.message, 'error'); }
+    }, 80);
+  }
+
+  function bindEffectControls() {
+    EFFECT_BINDINGS.forEach(([inputId, key, outputId, formatter, section]) => {
+      const input = $(inputId);
+      input.addEventListener('input', () => {
+        state.effects[key] = Number(input.value);
+        $(outputId).textContent = formatter(state.effects[key]);
+        updateRangeFill(input);
+        markCustom(section === 'advanced' ? 'advanced' : 'basic');
+        if (section === 'transport') scheduleTransportRestart();
+        else engine.setEffectState(state.effects);
+      });
+    });
+    const limiterSelect = $('limiterThresholdSlider');
+    limiterSelect.addEventListener('change', () => { state.effects.limiterThreshold = Number(limiterSelect.value); $('limiterThresholdValue').textContent = `${limiterSelect.value} dB`; markCustom('advanced'); engine.setEffectState(state.effects); });
+  }
+
+  function setSwitch(id, active) {
+    const button = $(id);
+    button.setAttribute('aria-checked', String(Boolean(active)));
+    button.classList.toggle('active', Boolean(active));
+  }
+
+  function bindSwitch(id, key, options) {
+    $(id).addEventListener('click', async () => {
+      state.effects[key] = !state.effects[key];
+      setSwitch(id, state.effects[key]);
+      if (options && options.control) $(options.control).disabled = !state.effects[key];
+      markCustom(options && options.section || 'advanced');
+      engine.setEffectState(state.effects);
+      if (options && options.rebuild) {
+        try { await engine.rebuildGraph(); } catch (error) { showMessage(error.message, 'error'); }
+      }
+    });
+  }
+
+  function renderAdvancedEq() {
+    const container = $('advancedEqBands');
+    container.innerHTML = '';
+    state.effects.advancedEq.forEach((band, index) => {
+      const row = document.createElement('div');
+      row.className = 'eq-band-row';
+      row.dataset.bandId = band.id;
+      row.innerHTML = `<label class="eq-enable"><input type="checkbox" ${band.enabled ? 'checked' : ''}><span>Band ${index + 1}</span></label><label>Type<select data-field="type"><option value="bell">Bell</option><option value="lowshelf">Low Shelf</option><option value="highshelf">High Shelf</option><option value="lowcut">Low Cut</option><option value="highcut">High Cut</option></select></label><label>Frequency<input data-field="frequency" type="number" min="20" max="20000" step="10" value="${band.frequency}"></label><label>Gain<input data-field="gain" type="number" min="-18" max="18" step="0.5" value="${band.gain}"></label><label>Q<input data-field="q" type="number" min="0.1" max="18" step="0.1" value="${band.q}"></label>`;
+      row.querySelector('[data-field="type"]').value = band.type;
+      const commit = async (rebuild) => {
+        band.enabled = row.querySelector('.eq-enable input').checked;
+        band.type = row.querySelector('[data-field="type"]').value;
+        band.frequency = Core.clamp(row.querySelector('[data-field="frequency"]').value, 20, 20000);
+        band.gain = Core.clamp(row.querySelector('[data-field="gain"]').value, -18, 18);
+        band.q = Core.clamp(row.querySelector('[data-field="q"]').value, .1, 18);
+        row.classList.toggle('enabled', band.enabled);
+        markCustom('advanced');
+        engine.setEffectState(state.effects);
+        if (rebuild) await engine.rebuildGraph();
+      };
+      row.querySelector('.eq-enable input').addEventListener('change', () => commit(true).catch((error) => showMessage(error.message, 'error')));
+      row.querySelector('[data-field="type"]').addEventListener('change', () => commit(true).catch((error) => showMessage(error.message, 'error')));
+      row.querySelectorAll('input[type="number"]').forEach((input) => input.addEventListener('change', () => commit(false).catch((error) => showMessage(error.message, 'error'))));
+      row.classList.toggle('enabled', band.enabled);
+      container.appendChild(row);
+    });
+  }
+
+  function syncEffectsToUI() {
+    EFFECT_BINDINGS.forEach(([inputId, key, outputId, formatter]) => {
+      const input = $(inputId); input.value = state.effects[key]; $(outputId).textContent = formatter(Number(state.effects[key])); updateRangeFill(input);
+    });
+    $('limiterThresholdSlider').value = String(state.effects.limiterThreshold);
+    $('limiterThresholdValue').textContent = `${state.effects.limiterThreshold} dB`;
+    setSwitch('eightDToggle', state.effects.eightD); $('eightDSpeed').disabled = !state.effects.eightD;
+    setSwitch('highPassToggle', state.effects.highPassEnabled);
+    setSwitch('lowPassToggle', state.effects.lowPassEnabled);
+    setSwitch('compressorToggle', state.effects.compressorEnabled);
+    setSwitch('limiterToggle', state.effects.limiterEnabled);
+    renderAdvancedEq();
+  }
+
+  async function applyEffects(nextEffects, presetKey, label, colors) {
+    const wasPlaying = engine.playing;
+    const position = wasPlaying ? engine.currentOffset() : state.playhead;
+    engine.stop(false);
+    state.effects = normalizeEffects(nextEffects);
+    state.activePreset = presetKey || 'custom';
+    engine.setEffectState(state.effects);
+    syncEffectsToUI();
+    $('activePresetName').textContent = label || 'Custom';
+    document.querySelectorAll('.preset-btn').forEach((button) => { const active = button.dataset.preset === presetKey; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
+    if (colors) { document.documentElement.style.setProperty('--vibe-primary', colors[0]); document.documentElement.style.setProperty('--vibe-secondary', colors[1]); }
+    try { await engine.rebuildGraph(); if (wasPlaying) { await engine.play(position); playbackLoop(); } } catch (error) { showMessage(error.message, 'error'); }
+  }
+
+  function renderFactoryPresets() {
+    const grid = $('presetsGrid');
+    grid.innerHTML = '';
+    Object.entries(FACTORY_PRESETS).forEach(([key, preset], index) => {
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = `preset-btn${key === state.activePreset ? ' active' : ''}`;
+      button.dataset.preset = key; button.dataset.category = preset.category; button.dataset.code = String(index + 1).padStart(2, '0'); button.setAttribute('aria-pressed', String(key === state.activePreset));
+      button.innerHTML = `<i data-lucide="${preset.icon}"></i><span>${preset.label}</span><small>${preset.description}</small>`;
+      button.addEventListener('click', () => { applyEffects(preset, key, preset.label, preset.colors); showPresetToast(preset.label); });
+      grid.appendChild(button);
+    });
+  }
+
+  function showPresetToast(name) {
+    $('presetToastName').textContent = name; $('presetToast').classList.add('show');
+    clearTimeout(showPresetToast.timer); showPresetToast.timer = setTimeout(() => $('presetToast').classList.remove('show'), 2200);
+  }
+
+  function saveUserPresets() {
+    try { localStorage.setItem(PRESET_STORAGE_KEY, Core.serializePresetCollection(state.userPresets)); } catch (error) { showMessage('The preset could not be saved in this browser.', 'error'); }
+  }
+
+  function renderUserPresets() {
+    const list = $('myPresetsList'); list.innerHTML = '';
+    if (!state.userPresets.length) { list.innerHTML = '<p class="empty-presets">No saved presets yet.</p>'; return; }
+    state.userPresets.forEach((preset) => {
+      const row = document.createElement('div'); row.className = 'my-preset-row';
+      const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'my-preset-apply'; apply.textContent = preset.name;
+      apply.addEventListener('click', () => { applyEffects(preset.effects, preset.id, preset.name); showPresetToast(preset.name); });
+      const rename = document.createElement('button'); rename.type = 'button'; rename.className = 'icon-action'; rename.setAttribute('aria-label', `Rename ${preset.name}`); rename.innerHTML = '<i data-lucide="pencil"></i>';
+      rename.addEventListener('click', () => { const name = window.prompt('Rename preset', preset.name); if (!name || !name.trim()) return; preset.name = name.trim().slice(0, 48); saveUserPresets(); renderUserPresets(); if (window.lucide) window.lucide.createIcons(); });
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'icon-action danger'; remove.setAttribute('aria-label', `Delete ${preset.name}`); remove.innerHTML = '<i data-lucide="trash-2"></i>';
+      remove.addEventListener('click', () => { state.userPresets = state.userPresets.filter((item) => item.id !== preset.id); saveUserPresets(); renderUserPresets(); if (window.lucide) window.lucide.createIcons(); });
+      row.append(apply, rename, remove); list.appendChild(row);
+    });
+  }
+
+  function withTimeout(promise, timeoutMs, message) {
+    let timeout;
+    return Promise.race([promise, new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error(message)), timeoutMs); })]).finally(() => clearTimeout(timeout));
+  }
+
+  function decodeAudioDataCompat(context, arrayBuffer) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const succeed = (buffer) => { if (!settled) { settled = true; resolve(buffer); } };
+      const fail = (error) => { if (!settled) { settled = true; reject(error || new Error('The browser could not decode this audio file.')); } };
+      try { const result = context.decodeAudioData(arrayBuffer.slice(0), succeed, fail); if (result && result.then) result.then(succeed, fail); } catch (error) { fail(error); }
+    });
+  }
+
+  function isFlac(file) { return /\.flac$/i.test(file.name) || /audio\/(x-)?flac/i.test(file.type || ''); }
+
+  async function decodeFlac(context, arrayBuffer) {
+    const library = window['flac-decoder'];
+    const Decoder = library && ((typeof Worker === 'function' && library.FLACDecoderWebWorker) || library.FLACDecoder);
+    if (!Decoder) throw new Error('The FLAC decoder could not be loaded. Reload the page.');
+    const decoder = new Decoder();
+    try {
+      await withTimeout(decoder.ready, 30000, 'Loading the FLAC decoder took too long.');
+      const decoded = await withTimeout(decoder.decodeFile(new Uint8Array(arrayBuffer)), 120000, 'FLAC decoding took too long.');
+      const channels = decoded && Array.isArray(decoded.channelData) ? decoded.channelData : [];
+      const samples = channels.length ? Math.min(decoded.samplesDecoded || Infinity, ...channels.map((channel) => channel.length)) : 0;
+      if (!channels.length || !samples || !decoded.sampleRate) throw new Error('No audio samples were found in this FLAC file.');
+      const output = context.createBuffer(channels.length, samples, decoded.sampleRate);
+      channels.forEach((channel, index) => output.copyToChannel(channel.subarray(0, samples), index));
+      return output;
     } finally {
-        downloadBtn.querySelector('span').textContent = 'Export';
-        downloadBtn.disabled = false;
-        formatInputs.forEach(input => { input.disabled = false; });
+      try { if (decoder.terminate) decoder.terminate(); else if (decoder.free) decoder.free(); } catch (error) {}
     }
-}
+  }
 
-function downloadBlob(blob, fileName) {
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = fileName;
-    anchor.style.display = 'none';
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-}
-
-async function resampleAudioBuffer(buffer, targetSampleRate) {
-    if (buffer.sampleRate === targetSampleRate) return buffer;
-    const OfflineContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    if (!OfflineContext) throw new Error('This browser does not support the feature required for MP3 export.');
-
-    const frameCount = Math.ceil(buffer.duration * targetSampleRate);
-    const context = new OfflineContext(Math.min(2, buffer.numberOfChannels), frameCount, targetSampleRate);
-    const source = context.createBufferSource();
-    source.buffer = buffer;
-    source.connect(context.destination);
-    source.start(0);
-    return context.startRendering();
-}
-
-function floatToInt16(floatData) {
-    const pcm = new Int16Array(floatData.length);
-    for (let i = 0; i < floatData.length; i++) {
-        const sample = Math.max(-1, Math.min(1, floatData[i]));
-        pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+  async function decodeFile(file, bytes) {
+    const context = engine.context.rawContext;
+    if (isFlac(file)) {
+      setProcessing(true, 'Decoding FLAC...', 38);
+      try { return await decodeFlac(context, bytes); } catch (flacError) {
+        try { return await withTimeout(decodeAudioDataCompat(context, bytes), 60000, 'FLAC decoding timed out.'); } catch (nativeError) { throw new Error(`This FLAC file could not be decoded. ${flacError.message}`); }
+      }
     }
-    return pcm;
-}
+    return withTimeout(decodeAudioDataCompat(context, bytes), 90000, 'Audio decoding timed out. The file may be damaged or unsupported by this browser.');
+  }
 
-async function audioBufferToMp3(buffer, bitrate) {
-    if (!window.lamejs || !window.lamejs.Mp3Encoder) {
-        throw new Error('The MP3 encoder could not be loaded. Check your connection and try again.');
+  async function loadAudioFile(file) {
+    if (state.loading || state.exporting) return;
+    if (!file || (!(file.type || '').startsWith('audio/') && !SUPPORTED_EXTENSION.test(file.name || ''))) return showMessage('Choose an MP3, WAV, FLAC, M4A/AAC or OGG audio file.', 'error');
+    setProcessing(true, 'Reading audio file...', 10);
+    engine.primeFromGesture();
+    try {
+      engine.stop(); cancelAnimationFrame(state.animationFrame);
+      const bytes = await withTimeout(file.arrayBuffer(), 120000, 'Reading this file took too long.');
+      setProcessing(true, 'Decoding audio...', 28);
+      const decoded = await decodeFile(file, bytes);
+      if (!decoded || !decoded.length) throw new Error('The decoded audio is empty.');
+      const originalData = nativeToData(decoded);
+      state.originalData = Core.cloneBufferData(originalData);
+      state.workingData = Core.cloneBufferData(originalData);
+      state.originalBuffer = dataToNative(state.originalData);
+      state.workingBuffer = dataToNative(state.workingData);
+      state.clipboard = null; state.selection = null; state.playhead = 0; state.zoom = 1; state.file = file;
+      state.history.clear(); state.compareMode = 'modified';
+      engine.setBuffers(state.originalBuffer, state.workingBuffer); engine.setCompareMode('modified'); engine.setEffectState(state.effects);
+      $('fileName').textContent = file.name;
+      $('fileSize').textContent = Core.formatFileSize(file.size);
+      $('fileFormat').textContent = Core.detectAudioFormat(file);
+      $('exportFilename').value = Core.defaultEditedFilename(file.name, 'wav');
+      $('editorWorkspace').hidden = false;
+      $('uploadSection').classList.add('has-file');
+      updateZoom(1); updateAfterBufferChange(); updateHistoryButtons(); setPlayIcon(false); compare('modified');
+      showMessage(`${file.name} is ready.`, 'success', 3000);
+    } catch (error) {
+      showMessage(error.message || 'This audio file could not be loaded.', 'error', 0);
+    } finally {
+      setProcessing(false);
+      $('fileInput').value = '';
     }
+  }
 
-    const channels = Math.min(2, buffer.numberOfChannels);
-    const encoder = new window.lamejs.Mp3Encoder(channels, buffer.sampleRate, bitrate);
-    const left = floatToInt16(buffer.getChannelData(0));
-    const right = channels > 1 ? floatToInt16(buffer.getChannelData(1)) : left;
-    const blockSize = 1152;
-    const mp3Chunks = [];
-    const totalBlocks = Math.ceil(left.length / blockSize);
+  let silenceAnalysisTimer;
+  function scheduleSilenceAnalysis() {
+    clearTimeout(silenceAnalysisTimer);
+    if (!state.workingData) return;
+    silenceAnalysisTimer = setTimeout(() => {
+      try {
+        const analysis = Core.analyzeSilence(state.workingData, { thresholdDb: Number($('silenceThreshold').value), minimumDuration: Number($('silenceDuration').value) });
+        $('silenceEstimate').textContent = analysis.removedSeconds > 0.005 ? `Approximately ${formatTime(analysis.removedSeconds, true)} can be removed.` : 'No matching silence detected.';
+      } catch (error) { $('silenceEstimate').textContent = 'Silence analysis is unavailable.'; }
+    }, 180);
+  }
 
-    for (let offset = 0, block = 0; offset < left.length; offset += blockSize, block++) {
-        const leftChunk = left.subarray(offset, Math.min(offset + blockSize, left.length));
-        const rightChunk = right.subarray(offset, Math.min(offset + blockSize, right.length));
-        const encoded = channels > 1
-            ? encoder.encodeBuffer(leftChunk, rightChunk)
-            : encoder.encodeBuffer(leftChunk);
-        if (encoded.length) mp3Chunks.push(new Uint8Array(encoded));
+  function bindEditing() {
+    $('copyBtn').addEventListener('click', () => { try { state.clipboard = Core.copyRange(state.workingData, state.selection); updateSelectionUI(); showMessage('Selection copied to the editor clipboard.', 'success'); } catch (error) { showMessage(error.message, 'error'); } });
+    $('trimBtn').addEventListener('click', () => performEdit('Trim', () => ({ buffer: Core.trimBuffer(state.workingData, state.selection), selection: null, playhead: 0 })));
+    $('cutBtn').addEventListener('click', () => performEdit('Cut', () => { state.clipboard = Core.copyRange(state.workingData, state.selection); const start = Core.normalizeSelection(state.selection, currentDuration()).start; return { buffer: Core.deleteRange(state.workingData, state.selection), selection: null, playhead: start }; }));
+    $('deleteBtn').addEventListener('click', () => performEdit('Delete selection', () => { const start = Core.normalizeSelection(state.selection, currentDuration()).start; return { buffer: Core.deleteRange(state.workingData, state.selection), selection: null, playhead: start }; }));
+    $('pasteBtn').addEventListener('click', () => performEdit('Paste', () => { if (!state.clipboard) throw new Error('Copy or cut audio before pasting.'); const pasted = Core.pasteBuffer(state.workingData, state.clipboard, state.playhead); return { buffer: pasted.buffer, selection: pasted.insertedSelection, playhead: pasted.insertedSelection.end }; }));
+    $('reverseBtn').addEventListener('click', () => performHeavyEdit('Reverse', () => ({ buffer: Core.reverseBuffer(state.workingData, state.selection), selection: state.selection, playhead: state.playhead })));
+    $('fadeInBtn').addEventListener('click', () => performHeavyEdit('Fade In', () => ({ buffer: Core.fadeBuffer(state.workingData, state.selection, 'in', 3), selection: state.selection, playhead: state.playhead })));
+    $('fadeOutBtn').addEventListener('click', () => performHeavyEdit('Fade Out', () => ({ buffer: Core.fadeBuffer(state.workingData, state.selection, 'out', 3), selection: state.selection, playhead: state.playhead })));
+    $('normalizeBtn').addEventListener('click', () => performHeavyEdit('Peak normalization', () => ({ buffer: Core.normalizeBuffer(state.workingData, -1), selection: state.selection, playhead: state.playhead })));
+    $('removeSilenceBtn').addEventListener('click', () => performHeavyEdit('Remove Silence', () => { const result = Core.removeSilence(state.workingData, { thresholdDb: Number($('silenceThreshold').value), minimumDuration: Number($('silenceDuration').value) }); if (!result.analysis.intervals.length) throw new Error('No silence matched these settings.'); return { buffer: result.buffer, selection: null, playhead: Math.min(state.playhead, Core.bufferDuration(result.buffer)) }; }));
+    $('undoBtn').addEventListener('click', () => { const snapshot = state.history.undo(currentSnapshot('Redo')); if (snapshot) restoreSnapshot(snapshot); updateHistoryButtons(); });
+    $('redoBtn').addEventListener('click', () => { const snapshot = state.history.redo(currentSnapshot('Undo')); if (snapshot) restoreSnapshot(snapshot); updateHistoryButtons(); });
+  }
 
-        if (block % 48 === 0) {
-            const progress = Math.min(99, Math.round((block / Math.max(1, totalBlocks)) * 100));
-            downloadBtn.querySelector('span').textContent = 'MP3 ' + progress + '%';
-            await new Promise(resolve => requestAnimationFrame(resolve));
-        }
-    }
+  function resetSection(section) {
+    const defaults = defaultEffects();
+    const keys = section === 'advanced'
+      ? ['advancedEq', 'vocalBoost', 'stereoWidth', 'distortionDrive', 'distortionMix', 'highPassEnabled', 'highPassFrequency', 'lowPassEnabled', 'lowPassFrequency', 'compressorEnabled', 'compressorThreshold', 'compressorRatio', 'limiterEnabled', 'limiterThreshold']
+      : ['speed', 'pitch', 'fineTune', 'volume', 'gainDb', 'bass', 'mid', 'treble', 'reverb', 'echo', 'pan', 'eightD', 'eightDSpeed'];
+    const update = {}; keys.forEach((key) => { update[key] = defaults[key]; });
+    applyEffects(Object.assign({}, state.effects, update), 'custom', 'Custom');
+  }
 
-    const flushed = encoder.flush();
-    if (flushed.length) mp3Chunks.push(new Uint8Array(flushed));
-    return new Blob(mp3Chunks, { type: 'audio/mpeg' });
-}
+  function resetAll() {
+    if (!state.originalData) return;
+    engine.stop(); state.history.clear(); state.clipboard = null; state.selection = null; state.playhead = 0; state.zoom = 1;
+    state.workingData = Core.cloneBufferData(state.originalData); state.workingBuffer = dataToNative(state.workingData);
+    engine.setWorkingBuffer(state.workingBuffer); applyEffects(defaultEffects(), 'normal', 'Normal', FACTORY_PRESETS.normal.colors);
+    updateAfterBufferChange(); updateHistoryButtons(); updateSelectionUI(); showMessage('The original audio and all controls were restored.', 'success');
+  }
 
-// ── WAV Encoder
-function audioBufferToWav(buffer) {
-    const nCh = buffer.numberOfChannels, len = buffer.length * nCh * 2;
-    const ab = new ArrayBuffer(44 + len), view = new DataView(ab);
-    const ws = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o+i, s.charCodeAt(i)); };
-    ws(0,'RIFF'); view.setUint32(4, 36+len, true);
-    ws(8,'WAVE'); ws(12,'fmt ');
-    view.setUint32(16,16,true); view.setUint16(20,1,true);
-    view.setUint16(22,nCh,true); view.setUint32(24,buffer.sampleRate,true);
-    view.setUint32(28,buffer.sampleRate*nCh*2,true);
-    view.setUint16(32,nCh*2,true); view.setUint16(34,16,true);
-    ws(36,'data'); view.setUint32(40,len,true);
-    const chs = Array.from({length:nCh},(_,i)=>buffer.getChannelData(i));
-    let off = 44;
-    for (let i = 0; i < buffer.length; i++)
-        for (let c = 0; c < nCh; c++) {
-            const s = Math.max(-1,Math.min(1,chs[c][i]));
-            view.setInt16(off, s<0 ? s*0x8000 : s*0x7FFF, true); off += 2;
-        }
-    return ab;
-}
+  function updateExportUI() {
+    const format = document.querySelector('input[name="exportFormat"]:checked').value;
+    $('bitDepthField').hidden = format !== 'wav';
+    $('bitrateField').hidden = !['mp3', 'm4a'].includes(format);
+    $('exportFilename').value = Core.buildExportFilename($('exportFilename').value, format === 'm4a' ? 'm4a' : format);
+  }
 
-// ── Keyboard Shortcuts
-function handleKeydown(e) {
-    if (!audioBuffer) return;
-    const tag = e.target.tagName.toLowerCase();
-    if (tag==='textarea') return;
-    if (tag==='input' && e.target.type!=='range') return;
-    switch (e.key) {
-        case ' ': case 'k': case 'K': e.preventDefault(); play(); break;
-        case 'ArrowLeft':  e.preventDefault(); seekRelative(-5);  break;
-        case 'ArrowRight': e.preventDefault(); seekRelative(5);   break;
-        case 'j': case 'J': e.preventDefault(); seekRelative(-10); break;
-        case 'l': case 'L': e.preventDefault(); seekRelative(10);  break;
-        case 'Home': e.preventDefault(); seekTo(0); break;
-        case 'End':  e.preventDefault(); seekTo(getDuration()); break;
-        case 'ArrowUp':   e.preventDefault(); changeVolume(5);  break;
-        case 'ArrowDown': e.preventDefault(); changeVolume(-5); break;
-        case 'm': case 'M': e.preventDefault(); toggleMute(); break;
-    }
-}
+  function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+  }
 
-function seekRelative(s) {
-    if (!audioBuffer) return;
-    const was = isPlaying;
-    if (isPlaying) pause();
-    pauseOffset = Math.max(0, Math.min(getDuration(), getCurrentOffset() + s));
-    syncProgressUI(pauseOffset);
-    if (was) play();
-}
-function seekTo(t) {
-    if (!audioBuffer) return;
-    const was = isPlaying;
-    if (isPlaying) pause();
-    pauseOffset = Math.max(0, Math.min(getDuration(), t));
-    syncProgressUI(pauseOffset);
-    if (was) play();
-}
+  async function exportCurrentAudio() {
+    if (!state.workingBuffer || state.exporting) return showMessage('Load an audio file first.', 'error');
+    const format = document.querySelector('input[name="exportFormat"]:checked').value;
+    let settings;
+    try {
+      settings = Core.validateExportSettings({ format, sampleRate: Number($('exportSampleRate').value), channels: Number($('exportChannels').value), bitDepth: Number($('exportBitDepth').value), bitrate: Number($('exportBitrate').value) });
+    } catch (error) { return showMessage(error.message, 'error'); }
+    state.exporting = true; $('downloadBtn').disabled = true; setProcessing(true, 'Rendering effects...', 1);
+    try {
+      const result = await ExportApi.exportAudio({ buffer: state.workingBuffer, effectState: state.effects, settings, onProgress: (progress, message) => setProcessing(true, message, Math.round(progress * 100)) });
+      const filename = Core.buildExportFilename($('exportFilename').value, result.extension);
+      $('exportFilename').value = filename;
+      triggerDownload(result.blob, filename);
+      const renderedData = nativeToData(result.renderedBuffer); const peak = Core.getPeak(renderedData); const peakDb = Core.gainToDb(peak);
+      $('peakValue').textContent = `${peakDb.toFixed(1)} dB`; $('clipIndicator').textContent = peak >= .999 ? 'CLIPPING DETECTED' : 'Clipping: No'; $('clipIndicator').classList.toggle('active', peak >= .999);
+      showMessage(`${filename} exported successfully.`, 'success', 5000);
+    } catch (error) { showMessage(`Export failed: ${error.message || 'Unknown encoder error.'}`, 'error', 0); }
+    finally { state.exporting = false; $('downloadBtn').disabled = false; setProcessing(false); }
+  }
 
-function changeVolume(d) {
-    const sl = document.getElementById('volumeSlider');
-    const nv = Math.max(0, Math.min(150, parseFloat(sl.value) + d));
-    sl.value = nv; document.getElementById('volumeValue').textContent = nv.toFixed(1) + '%';
-    if (toneGain) toneGain.gain.value = nv / 100;
-}
-function toggleMute() {
-    const sl = document.getElementById('volumeSlider');
-    if (isMuted) {
-        sl.value = previousVolume;
-        document.getElementById('volumeValue').textContent = previousVolume.toFixed(1) + '%';
-        if (toneGain) toneGain.gain.value = previousVolume / 100;
-        isMuted = false;
-    } else {
-        previousVolume = parseFloat(sl.value); sl.value = 0;
-        document.getElementById('volumeValue').textContent = '0% (Muted)';
-        if (toneGain) toneGain.gain.value = 0; isMuted = true;
-    }
-}
+  function bindWaveform() {
+    canvas.addEventListener('pointerdown', (event) => {
+      if (!state.workingData) return; engine.primeFromGesture(); canvas.setPointerCapture(event.pointerId);
+      state.draggingSelection = true; state.pointerStartX = event.clientX; state.pointerStartTime = pointerTime(event); state.selection = { start: state.pointerStartTime, end: state.pointerStartTime }; updateSelectionUI(); event.preventDefault();
+    });
+    canvas.addEventListener('pointermove', (event) => { if (!state.draggingSelection) return; state.selection = { start: state.pointerStartTime, end: pointerTime(event) }; updateSelectionUI(); event.preventDefault(); });
+    const finish = (event) => {
+      if (!state.draggingSelection) return; state.draggingSelection = false;
+      if (Math.abs(event.clientX - state.pointerStartX) < 5) { state.selection = null; seekTo(pointerTime(event), false); }
+      else state.selection = Core.normalizeSelection(state.selection, currentDuration());
+      updateSelectionUI();
+    };
+    canvas.addEventListener('pointerup', finish); canvas.addEventListener('pointercancel', finish);
+    $('clearSelectionBtn').addEventListener('click', () => { state.selection = null; updateSelectionUI(); });
+    $('zoomInBtn').addEventListener('click', () => updateZoom(state.zoom * 1.5)); $('zoomOutBtn').addEventListener('click', () => updateZoom(state.zoom / 1.5)); $('zoomResetBtn').addEventListener('click', () => updateZoom(1));
+    $('waveLeftBtn').addEventListener('click', () => $('waveformScroll').scrollBy({ left: -$('waveformScroll').clientWidth * .7, behavior: 'smooth' }));
+    $('waveRightBtn').addEventListener('click', () => $('waveformScroll').scrollBy({ left: $('waveformScroll').clientWidth * .7, behavior: 'smooth' }));
+    window.addEventListener('resize', () => { clearTimeout(resizeWaveform.timer); resizeWaveform.timer = setTimeout(resizeWaveform, 120); });
+  }
 
-// ── Utils
-function formatTime(s) {
-    if (!isFinite(s) || s < 0) return '0:00';
-    const m = Math.floor(s/60), sec = Math.floor(s%60);
-    return m + ':' + (sec < 10 ? '0' : '') + sec;
-}
-function gainToDb(g)  { return 20 * Math.log10(Math.max(g, 0.00001)); }
-function dbToGain(db) { return Math.pow(10, db / 20); }
+  function bindUpload() {
+    $('fileInput').addEventListener('change', (event) => { const file = event.target.files && event.target.files[0]; if (file) loadAudioFile(file); });
+    const upload = $('uploadSection');
+    ['dragenter', 'dragover'].forEach((name) => upload.addEventListener(name, (event) => { event.preventDefault(); upload.classList.add('drag-over'); }));
+    ['dragleave', 'drop'].forEach((name) => upload.addEventListener(name, (event) => { event.preventDefault(); upload.classList.remove('drag-over'); }));
+    upload.addEventListener('drop', (event) => { const file = event.dataTransfer.files && event.dataTransfer.files[0]; if (file) loadAudioFile(file); });
+    upload.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('fileInput').click(); } });
+  }
 
-console.log('🎵 Audio Editor — Tone.js PitchShift (real phase vocoder) ✅');
+  function bindPlayer() {
+    $('playBtn').addEventListener('click', togglePlayback);
+    $('stopBtn').addEventListener('click', () => { engine.stop(); setPlayIcon(false); updateProgress(0); });
+    $('backBtn').addEventListener('click', () => seekTo(state.playhead - 10)); $('forwardBtn').addEventListener('click', () => seekTo(state.playhead + 10));
+    $('progressBar').addEventListener('click', (event) => { const rect = $('progressBar').getBoundingClientRect(); seekTo((event.clientX - rect.left) / rect.width * playbackDuration()); });
+    $('compareOriginalBtn').addEventListener('click', () => compare('original')); $('compareModifiedBtn').addEventListener('click', () => compare('modified'));
+  }
+
+  function bindPresets() {
+    $('presetToggle').addEventListener('click', () => { const open = $('presetToggle').getAttribute('aria-expanded') !== 'true'; $('presetToggle').setAttribute('aria-expanded', String(open)); $('presetToggleLabel').textContent = open ? 'Hide presets' : 'Show presets'; $('presetPanel').setAttribute('aria-hidden', String(!open)); $('presetPanel').inert = !open; $('presetPanel').classList.toggle('open', open); });
+    document.querySelectorAll('.preset-filter').forEach((filter) => filter.addEventListener('click', () => { document.querySelectorAll('.preset-filter').forEach((button) => button.classList.toggle('active', button === filter)); document.querySelectorAll('.preset-btn').forEach((button) => { button.hidden = filter.dataset.filter !== 'all' && button.dataset.category !== filter.dataset.filter; }); }));
+    $('savePresetBtn').addEventListener('click', () => { try { const record = Core.createPresetRecord($('presetNameInput').value, state.effects); state.userPresets.push(record); saveUserPresets(); renderUserPresets(); $('presetNameInput').value = ''; if (window.lucide) window.lucide.createIcons(); showMessage(`${record.name} saved on this device.`, 'success'); } catch (error) { showMessage(error.message, 'error'); } });
+  }
+
+  function bindAdvanced() {
+    bindSwitch('eightDToggle', 'eightD', { control: 'eightDSpeed', section: 'basic', rebuild: true });
+    bindSwitch('highPassToggle', 'highPassEnabled', { section: 'advanced' }); bindSwitch('lowPassToggle', 'lowPassEnabled', { section: 'advanced' });
+    bindSwitch('compressorToggle', 'compressorEnabled', { section: 'advanced' }); bindSwitch('limiterToggle', 'limiterEnabled', { section: 'advanced' });
+    $('resetEqBtn').addEventListener('click', () => { state.effects.advancedEq = JSON.parse(JSON.stringify(DEFAULT_ADVANCED_EQ)); renderAdvancedEq(); markCustom('advanced'); engine.rebuildGraph().catch((error) => showMessage(error.message, 'error')); });
+    $('resetBasicBtn').addEventListener('click', () => resetSection('basic')); $('resetAdvancedBtn').addEventListener('click', () => resetSection('advanced'));
+    $('resetEffectBtn').addEventListener('click', () => resetSection(state.lastSection)); $('resetBtn').addEventListener('click', resetAll);
+    $('silenceThreshold').addEventListener('input', () => { $('silenceThresholdValue').textContent = `${$('silenceThreshold').value} dB`; updateRangeFill($('silenceThreshold')); scheduleSilenceAnalysis(); });
+    $('silenceDuration').addEventListener('input', () => { $('silenceDurationValue').textContent = `${Number($('silenceDuration').value).toFixed(2)} s`; updateRangeFill($('silenceDuration')); scheduleSilenceAnalysis(); });
+  }
+
+  function isEditableTarget(target) { return target && (target.matches('input, textarea, select') || target.isContentEditable); }
+  function bindKeyboard() {
+    window.addEventListener('keydown', (event) => {
+      if (isEditableTarget(event.target)) return;
+      const modifier = event.ctrlKey || event.metaKey;
+      if (event.code === 'Space') { event.preventDefault(); togglePlayback(); }
+      else if (event.key.toLowerCase() === 'j') { event.preventDefault(); seekTo(state.playhead - 10); }
+      else if (event.key.toLowerCase() === 'l') { event.preventDefault(); seekTo(state.playhead + 10); }
+      else if (modifier && event.key.toLowerCase() === 'z' && !event.shiftKey) { event.preventDefault(); $('undoBtn').click(); }
+      else if ((modifier && event.key.toLowerCase() === 'z' && event.shiftKey) || (modifier && event.key.toLowerCase() === 'y')) { event.preventDefault(); $('redoBtn').click(); }
+      else if (modifier && event.key.toLowerCase() === 'c') { event.preventDefault(); $('copyBtn').click(); }
+      else if (modifier && event.key.toLowerCase() === 'x') { event.preventDefault(); $('cutBtn').click(); }
+      else if (modifier && event.key.toLowerCase() === 'v') { event.preventDefault(); $('pasteBtn').click(); }
+      else if (event.key === 'Delete' || event.key === 'Backspace') { if (state.selection) { event.preventDefault(); $('deleteBtn').click(); } }
+    });
+  }
+
+  function initialize() {
+    canvas = $('waveform'); canvasContext = canvas.getContext('2d');
+    engine = new EngineApi.AudioEngine({ onMeter: (meter) => { $('peakValue').textContent = `${meter.peakDb.toFixed(1)} dB`; $('rmsValue').textContent = `${meter.rmsDb.toFixed(1)} dB`; $('clipIndicator').textContent = meter.clipping ? 'CLIPPING DETECTED' : 'Clipping: No'; $('clipIndicator').classList.toggle('active', meter.clipping); } });
+    engine.setEffectState(state.effects);
+    try { state.userPresets = Core.parsePresetCollection(localStorage.getItem(PRESET_STORAGE_KEY)); } catch (error) { state.userPresets = []; }
+    renderFactoryPresets(); renderUserPresets(); renderAdvancedEq(); syncEffectsToUI();
+    bindUpload(); bindPlayer(); bindWaveform(); bindEditing(); bindEffectControls(); bindAdvanced(); bindPresets(); bindKeyboard();
+    document.querySelectorAll('input[type="range"]').forEach(updateRangeFill);
+    document.querySelectorAll('input[name="exportFormat"]').forEach((input) => input.addEventListener('change', updateExportUI));
+    $('downloadBtn').addEventListener('click', exportCurrentAudio); updateExportUI(); updateSelectionUI(); updateHistoryButtons();
+    const prime = () => engine.primeFromGesture(); document.addEventListener('pointerdown', prime, { passive: true }); document.addEventListener('touchend', prime, { passive: true }); document.addEventListener('keydown', prime);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && engine.playing) engine.ensureRunning().catch(() => {}); });
+    window.addEventListener('pagehide', () => { cancelAnimationFrame(state.animationFrame); if (engine) engine.stop(); });
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  document.addEventListener('DOMContentLoaded', initialize);
+})();

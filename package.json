@@ -1,0 +1,10 @@
+{
+  "name": "audio-editor-static",
+  "private": true,
+  "version": "3.0.0",
+  "description": "Static browser audio editor with dependency-free Node tests for editor logic.",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "check": "node --check script.js && node --check audio-editor-core.js && node --check audio-engine.js && node --check export-engine.js"
+  }
+}

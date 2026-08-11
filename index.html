@@ -2,429 +2,199 @@
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#11121a">
   <title>Audio Editor</title>
-
-  <!-- Fonts -->
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-
-  <!-- Icons -->
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-
-  <!-- Tone.js (PitchShift usa phase vocoder FFT — pitch sem alterar velocidade) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
-
-  <!-- LAME.js — codificação MP3 inteiramente no navegador -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
-
-  <!-- Favicon -->
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
   <link rel="manifest" href="site.webmanifest">
-
-  <link rel="stylesheet" href="styles.css?v=20260810-7">
-
+  <link rel="stylesheet" href="styles.css?v=20260810-8">
 </head>
 <body>
-
-<!-- Ambient background orbs -->
-<div class="ambient" aria-hidden="true">
-  <div class="ambient-grid"></div>
-  <div class="ambient-beam"></div>
-  <div class="preset-aura"></div>
-  <div class="orb orb-1"></div>
-  <div class="orb orb-2"></div>
-  <div class="orb orb-3"></div>
-</div>
-
-<!-- Pitch Processing Banner -->
-<div class="pitch-processing-banner" id="pitchProcessingBanner" aria-live="polite" aria-atomic="true">
-  <div class="pitch-processing-inner">
-    <div class="pitch-spinner" aria-hidden="true"></div>
-    <span>Processing pitch shift&hellip;</span>
+  <div class="ambient" aria-hidden="true">
+    <div class="ambient-grid"></div><div class="ambient-beam"></div><div class="preset-aura"></div>
+    <div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div>
   </div>
-</div>
 
-<div class="container">
-
-  <!-- Header -->
-  <header class="glass-card header-card">
-    <div class="header-inner">
-      <div class="brand">
-        <div class="logo-mark" aria-label="Audio Editor logo">
-          <svg width="44" height="44" viewBox="0 0 44 44" fill="none" aria-hidden="true">
-            <rect x="1" y="1" width="42" height="42" rx="13" fill="url(#logoFill)" fill-opacity=".14" stroke="url(#logoStroke)"/>
-            <path d="M11 27V17M17 32V12M23 28V16M29 34V10M35 25V19" stroke="url(#logoStroke)" stroke-width="3.25" stroke-linecap="round"/>
-            <defs>
-              <linearGradient id="logoFill" x1="6" y1="5" x2="39" y2="40"><stop stop-color="#8B5CF6"/><stop offset="1" stop-color="#22D3EE"/></linearGradient>
-              <linearGradient id="logoStroke" x1="9" y1="10" x2="36" y2="34"><stop stop-color="#A78BFA"/><stop offset="1" stop-color="#22D3EE"/></linearGradient>
-            </defs>
-          </svg>
-        </div>
-        <div class="brand-copy">
-          <div class="brand-name">Audio Editor</div>
-          <div class="brand-meta"><span>SONIC STUDIO</span><span class="brand-version">v2.0</span></div>
-        </div>
-      </div>
-      <div class="header-actions">
-        <button class="theme-toggle glass-btn icon-btn" data-theme-toggle aria-label="Switch to light mode">
-          <i data-lucide="moon"></i>
-        </button>
-      </div>
-    </div>
-
-    <details class="shortcuts-panel">
-      <summary class="shortcuts-summary">
-        <i data-lucide="keyboard"></i>
-        <span>Keyboard shortcuts</span>
-        <span class="shortcut-hint">Press Space to play</span>
-        <i data-lucide="chevron-down" class="chevron"></i>
-      </summary>
-      <div class="shortcuts-grid">
-        <div class="shortcut-item"><kbd>Space</kbd><span>Play / Pause</span></div>
-        <div class="shortcut-item"><kbd>&#8592;</kbd><span>-5 seconds</span></div>
-        <div class="shortcut-item"><kbd>&#8594;</kbd><span>+5 seconds</span></div>
-        <div class="shortcut-item"><kbd>J</kbd><span>-10 seconds</span></div>
-        <div class="shortcut-item"><kbd>L</kbd><span>+10 seconds</span></div>
-        <div class="shortcut-item"><kbd>&#8593;</kbd><span>Volume up</span></div>
-        <div class="shortcut-item"><kbd>&#8595;</kbd><span>Volume down</span></div>
-        <div class="shortcut-item"><kbd>M</kbd><span>Mute</span></div>
-      </div>
-    </details>
-  </header>
-
-  <section class="hero" aria-labelledby="heroTitle">
-    <div class="hero-copy">
-      <div class="eyebrow"><span class="eyebrow-signal"></span>REAL-TIME AUDIO LAB</div>
-      <h1 id="heroTitle">Make sound<br><span>unforgettable.</span></h1>
-      <p class="hero-lede">Transform speed, pitch and space with studio-grade controls that run entirely in your browser.</p>
-      <div class="hero-features" aria-label="Product highlights">
-        <span><i data-lucide="radio-tower"></i>Real time</span>
-        <span><i data-lucide="shield-check"></i>100% private</span>
-        <span><i data-lucide="sparkles"></i>22 presets</span>
-      </div>
-    </div>
-
-    <div class="hero-art" aria-hidden="true">
-      <div class="orbit orbit-one"></div>
-      <div class="orbit orbit-two"></div>
-      <div class="spectrum">
-        <i style="--level:34%;--delay:-1.1s"></i><i style="--level:62%;--delay:-.4s"></i>
-        <i style="--level:46%;--delay:-1.8s"></i><i style="--level:88%;--delay:-.7s"></i>
-        <i style="--level:70%;--delay:-1.4s"></i><i style="--level:98%;--delay:-.2s"></i>
-        <i style="--level:58%;--delay:-1.6s"></i><i style="--level:82%;--delay:-.9s"></i>
-        <i style="--level:42%;--delay:-.3s"></i><i style="--level:74%;--delay:-1.3s"></i>
-        <i style="--level:92%;--delay:-.6s"></i><i style="--level:54%;--delay:-1.9s"></i>
-        <i style="--level:78%;--delay:-.1s"></i><i style="--level:38%;--delay:-1.5s"></i>
-        <i style="--level:66%;--delay:-.8s"></i><i style="--level:48%;--delay:-1.2s"></i>
-        <i style="--level:86%;--delay:-.5s"></i><i style="--level:56%;--delay:-1.7s"></i>
-      </div>
-      <div class="sound-core"><i data-lucide="audio-waveform"></i></div>
-      <div class="floating-label label-format"><span>24 BIT</span><small>LOSSLESS</small></div>
-      <div class="floating-label label-engine"><span>LIVE</span><small>ENGINE</small></div>
-    </div>
-  </section>
-
-  <!-- Upload Section -->
-  <input class="file-input-native" type="file" id="fileInput" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/ogg,audio/x-m4a,audio/m4a,audio/aac,audio/flac,audio/x-flac,audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac" tabindex="-1">
-
-  <label class="upload-section glass-card" id="uploadSection" for="fileInput" role="button" tabindex="0">
-    <div class="upload-glow" aria-hidden="true"></div>
-    <div class="upload-icon-wrap">
-      <i data-lucide="arrow-up-from-line" class="upload-icon-svg"></i>
-    </div>
-    <div class="upload-copy">
-      <span class="upload-kicker">START A NEW SESSION</span>
-      <h2>Drop your track into the studio</h2>
-      <p class="upload-hint">Your audio never leaves this device.</p>
-      <p class="upload-formats">MP3 &middot; WAV &middot; OGG &middot; M4A &middot; AAC &middot; FLAC</p>
-    </div>
-    <span class="upload-btn glass-btn" id="chooseFileBtn" aria-hidden="true">
-      <span>Choose audio</span><i data-lucide="arrow-up-right"></i>
-    </span>
-  </label>
-
-  <!-- Player Section -->
-  <div class="player-section glass-card" id="playerSection">
-    <div class="player-toolbar">
-      <div class="file-info">
-        <span class="file-icon"><i data-lucide="file-audio"></i></span>
-        <span class="file-context">NOW PLAYING</span>
-        <span class="file-name" id="fileName">&mdash;</span>
-      </div>
-    </div>
-
-    <div class="waveform-container" id="visualizerContainer">
-      <canvas id="waveform" aria-label="Audio waveform and live frequency spectrum"></canvas>
-      <div class="visualizer-chrome" aria-hidden="true">
-        <span class="visualizer-bands">LOW&nbsp;&nbsp;•&nbsp;&nbsp;MID&nbsp;&nbsp;•&nbsp;&nbsp;HIGH</span>
-      </div>
-    </div>
-
-    <div class="progress-wrap">
-      <div class="progress-bar" id="progressBar">
-        <div class="progress-fill" id="progressFill"></div>
-        <div class="progress-thumb" id="progressThumb"></div>
-      </div>
-    </div>
-
-    <div class="time-display">
-      <span id="currentTime">0:00</span>
-      <span class="time-sep">/</span>
-      <span id="totalTime">0:00</span>
-    </div>
-
-    <div class="playback-controls">
-      <button class="control-icon-btn glass-btn" id="stopBtn" aria-label="Stop">
-        <i data-lucide="square"></i>
-      </button>
-      <button class="play-btn glass-btn" id="playBtn" aria-label="Play">
-        <svg id="playIcon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        <svg id="pauseIcon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-      </button>
-      <button class="control-icon-btn glass-btn" id="resetBtn" aria-label="Reset all">
-        <i data-lucide="refresh-ccw"></i>
-      </button>
-      <div class="export-group">
-        <div class="export-format" role="radiogroup" aria-label="Export audio format">
-          <div class="format-picker-heading">
-            <i data-lucide="file-music"></i>
-            <span>Export format</span>
+  <div class="container app-shell">
+    <header class="glass-card header-card">
+      <div class="header-inner">
+        <div class="brand">
+          <div class="logo-mark" aria-label="Audio Editor logo">
+            <svg width="44" height="44" viewBox="0 0 44 44" fill="none" aria-hidden="true"><rect x="1" y="1" width="42" height="42" rx="13" fill="url(#logoFill)" fill-opacity=".14" stroke="url(#logoStroke)"/><path d="M11 27V17M17 32V12M23 28V16M29 34V10M35 25V19" stroke="url(#logoStroke)" stroke-width="3.25" stroke-linecap="round"/><defs><linearGradient id="logoFill" x1="6" y1="5" x2="39" y2="40"><stop stop-color="#8B5CF6"/><stop offset="1" stop-color="#22D3EE"/></linearGradient><linearGradient id="logoStroke" x1="9" y1="10" x2="36" y2="34"><stop stop-color="#A78BFA"/><stop offset="1" stop-color="#22D3EE"/></linearGradient></defs></svg>
           </div>
-          <div class="format-options">
-            <label class="format-option">
-              <input type="radio" name="exportFormat" value="wav" checked>
-              <span class="format-option-surface">
-                <span class="format-copy"><strong>WAV</strong><small>Lossless</small></span>
-                <span class="format-check"><i data-lucide="check"></i></span>
-              </span>
-            </label>
-            <label class="format-option">
-              <input type="radio" name="exportFormat" value="mp3-320">
-              <span class="format-option-surface">
-                <span class="format-copy"><strong>MP3</strong><small>320 kbps</small></span>
-                <span class="format-check"><i data-lucide="check"></i></span>
-              </span>
-            </label>
-            <label class="format-option">
-              <input type="radio" name="exportFormat" value="mp3-192">
-              <span class="format-option-surface">
-                <span class="format-copy"><strong>MP3</strong><small>192 kbps</small></span>
-                <span class="format-check"><i data-lucide="check"></i></span>
-              </span>
-            </label>
+          <div class="brand-copy"><div class="brand-name">Audio Editor</div><div class="brand-meta"><span>SONIC STUDIO</span><span class="brand-version">v3.0</span></div></div>
+        </div>
+        <div class="header-actions">
+          <button class="theme-toggle glass-btn icon-btn" data-theme-toggle type="button" aria-label="Switch color theme"><i data-lucide="moon"></i></button>
+        </div>
+      </div>
+      <details class="shortcuts-panel">
+        <summary class="shortcuts-summary"><i data-lucide="keyboard"></i><span>Keyboard shortcuts</span><span class="shortcut-hint">Space to play</span><i data-lucide="chevron-down" class="chevron"></i></summary>
+        <div class="shortcuts-grid">
+          <div class="shortcut-item"><kbd>Space</kbd><span>Play / Pause</span></div>
+          <div class="shortcut-item"><kbd>J / L</kbd><span>Back / forward 10s</span></div>
+          <div class="shortcut-item"><kbd>Ctrl Z</kbd><span>Undo</span></div>
+          <div class="shortcut-item"><kbd>Ctrl Shift Z</kbd><span>Redo</span></div>
+          <div class="shortcut-item"><kbd>Ctrl C / X / V</kbd><span>Copy / Cut / Paste</span></div>
+          <div class="shortcut-item"><kbd>Delete</kbd><span>Delete selection</span></div>
+        </div>
+      </details>
+    </header>
+
+    <section class="hero" aria-labelledby="heroTitle">
+      <div class="hero-copy">
+        <h1 id="heroTitle">Make sound<br><span>unforgettable.</span></h1>
+        <p class="hero-lede">Edit, shape and export your music privately in the browser.</p>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
+        <div class="spectrum"><i style="--level:34%;--delay:-1.1s"></i><i style="--level:62%;--delay:-.4s"></i><i style="--level:46%;--delay:-1.8s"></i><i style="--level:88%;--delay:-.7s"></i><i style="--level:70%;--delay:-1.4s"></i><i style="--level:98%;--delay:-.2s"></i><i style="--level:58%;--delay:-1.6s"></i><i style="--level:82%;--delay:-.9s"></i><i style="--level:42%;--delay:-.3s"></i><i style="--level:74%;--delay:-1.3s"></i><i style="--level:92%;--delay:-.6s"></i><i style="--level:54%;--delay:-1.9s"></i><i style="--level:78%;--delay:-.1s"></i><i style="--level:38%;--delay:-1.5s"></i><i style="--level:66%;--delay:-.8s"></i><i style="--level:48%;--delay:-1.2s"></i><i style="--level:86%;--delay:-.5s"></i><i style="--level:56%;--delay:-1.7s"></i></div>
+        <div class="sound-core"><i data-lucide="audio-waveform"></i></div>
+      </div>
+    </section>
+
+    <div class="app-message" id="appMessage" role="status" aria-live="polite" hidden></div>
+    <div class="processing-overlay" id="processingOverlay" aria-live="polite" hidden><span class="processing-spinner" aria-hidden="true"></span><strong id="processingText">Processing audio...</strong><progress id="processingProgress" max="100" value="0"></progress></div>
+
+    <input class="file-input-native" type="file" id="fileInput" accept="audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/ogg,audio/x-m4a,audio/m4a,audio/mp4,audio/aac,audio/flac,audio/x-flac,audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac" tabindex="-1">
+    <label class="upload-section glass-card" id="uploadSection" for="fileInput" role="button" tabindex="0">
+      <div class="upload-glow" aria-hidden="true"></div><div class="upload-icon-wrap"><i data-lucide="arrow-up-from-line"></i></div>
+      <div class="upload-copy"><span class="upload-kicker">START A NEW SESSION</span><h2>Drop your track into the studio</h2><p class="upload-hint">Your audio never leaves this device.</p><p class="upload-formats">MP3 &middot; WAV &middot; FLAC &middot; M4A/AAC &middot; OGG</p></div>
+      <span class="upload-btn glass-btn" aria-hidden="true"><span>Choose audio</span><i data-lucide="arrow-up-right"></i></span>
+    </label>
+
+    <main id="editorWorkspace" class="editor-workspace" hidden>
+      <section class="player-section glass-card" aria-label="Audio player and waveform">
+        <div class="player-toolbar file-summary">
+          <div class="file-info"><span class="file-icon"><i data-lucide="file-audio"></i></span><span><small>TRACK</small><strong class="file-name" id="fileName">No file</strong></span></div>
+          <dl class="file-metadata"><div><dt>Duration</dt><dd id="fileDuration">0:00</dd></div><div><dt>Size</dt><dd id="fileSize">0 KB</dd></div><div><dt>Format</dt><dd id="fileFormat">Unknown</dd></div></dl>
+        </div>
+
+        <div class="waveform-toolbar">
+          <div><strong>Waveform</strong><span id="zoomValue">100%</span></div>
+          <div class="toolbar-buttons">
+            <button class="glass-btn compact-btn" id="waveLeftBtn" type="button" aria-label="Scroll waveform left"><i data-lucide="chevron-left"></i></button>
+            <button class="glass-btn compact-btn" id="zoomOutBtn" type="button" aria-label="Zoom waveform out"><i data-lucide="zoom-out"></i></button>
+            <button class="glass-btn compact-btn" id="zoomResetBtn" type="button">Reset zoom</button>
+            <button class="glass-btn compact-btn" id="zoomInBtn" type="button" aria-label="Zoom waveform in"><i data-lucide="zoom-in"></i></button>
+            <button class="glass-btn compact-btn" id="waveRightBtn" type="button" aria-label="Scroll waveform right"><i data-lucide="chevron-right"></i></button>
           </div>
         </div>
-        <button class="download-btn glass-btn" id="downloadBtn" aria-label="Export audio">
-          <i data-lucide="download"></i>
-          <span>Export</span>
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Presets Section -->
-  <div class="presets-section glass-card player-section" id="presetsSection">
-    <div class="preset-toolbar">
-      <div class="section-header section-header-rich">
-        <div>
-          <span class="section-kicker">22 SONIC WORLDS</span>
-          <strong>Choose your atmosphere</strong>
+        <div class="waveform-scroll" id="waveformScroll">
+          <div class="waveform-stage" id="waveformStage"><canvas id="waveform" aria-label="Audio waveform. Drag to select, tap to seek."></canvas></div>
         </div>
-        <i data-lucide="sparkles"></i>
-      </div>
-      <div class="preset-toolbar-actions">
-        <div class="preset-status">
-          <span>ACTIVE PRESET</span>
-          <strong id="activePresetName">Normal</strong>
-          <i></i>
+        <div class="selection-strip">
+          <dl><div><dt>Selection Start</dt><dd id="selectionStart">0:00.000</dd></div><div><dt>Selection End</dt><dd id="selectionEnd">0:00.000</dd></div><div><dt>Duration</dt><dd id="selectionDuration">0:00.000</dd></div></dl>
+          <button class="glass-btn compact-btn" id="clearSelectionBtn" type="button" disabled>Clear selection</button>
         </div>
-        <button class="preset-toggle glass-btn" id="presetToggle" type="button" aria-expanded="false" aria-controls="presetPanel">
-          <span id="presetToggleLabel">Show presets</span>
-          <i data-lucide="chevron-down"></i>
-        </button>
-      </div>
-    </div>
-
-    <div class="preset-panel" id="presetPanel" aria-hidden="true" inert>
-      <div class="preset-panel-inner">
-        <div class="preset-filters" role="group" aria-label="Filter presets">
-      <button class="preset-filter active" type="button" data-filter="all">All</button>
-      <button class="preset-filter" type="button" data-filter="character">Character</button>
-      <button class="preset-filter" type="button" data-filter="space">Spatial</button>
-      <button class="preset-filter" type="button" data-filter="extreme">Extreme</button>
-          <button class="preset-filter" type="button" data-filter="slowed">Slowed</button>
+        <div class="progress-wrap"><button class="progress-bar" id="progressBar" type="button" aria-label="Seek through audio"><span class="progress-fill" id="progressFill"></span><span class="progress-thumb" id="progressThumb"></span></button></div>
+        <div class="time-display"><span id="currentTime">0:00</span><span>/</span><span id="totalTime">0:00</span></div>
+        <div class="playback-controls playback-controls-v3">
+          <button class="control-icon-btn glass-btn" id="backBtn" type="button" aria-label="Go back 10 seconds"><i data-lucide="rotate-ccw"></i><small>10</small></button>
+          <button class="control-icon-btn glass-btn" id="stopBtn" type="button" aria-label="Stop"><i data-lucide="square"></i></button>
+          <button class="play-btn glass-btn" id="playBtn" type="button" aria-label="Play"><i data-lucide="play" id="playIcon"></i><i data-lucide="pause" id="pauseIcon" hidden></i></button>
+          <button class="control-icon-btn glass-btn" id="forwardBtn" type="button" aria-label="Go forward 10 seconds"><i data-lucide="rotate-cw"></i><small>10</small></button>
+          <div class="compare-toggle" role="group" aria-label="Compare original and modified audio"><button id="compareOriginalBtn" type="button" aria-pressed="false">Original</button><button id="compareModifiedBtn" type="button" class="active" aria-pressed="true">Modified</button></div>
         </div>
+        <div class="meter-row" aria-label="Output level"><span>Peak <strong id="peakValue">-∞ dB</strong></span><span>RMS <strong id="rmsValue">-∞ dB</strong></span><span class="clip-indicator" id="clipIndicator">Clipping: No</span></div>
+      </section>
 
-        <div class="presets-grid">
-      <button class="preset-btn active" data-code="01" data-category="essential" data-preset="normal" aria-pressed="true"><i data-lucide="circle-dot"></i><span>Normal</span><small>Clean reference</small></button>
-      <button class="preset-btn" data-code="02" data-category="extreme" data-preset="nightcore" aria-pressed="false"><i data-lucide="zap"></i><span>Nightcore</span><small>Fast + bright</small></button>
-      <button class="preset-btn" data-code="03" data-category="character" data-preset="deepbass" aria-pressed="false"><i data-lucide="waves"></i><span>Deep Bass</span><small>Heavy low end</small></button>
-      <button class="preset-btn" data-code="04" data-category="space" data-preset="8daudio" aria-pressed="false"><i data-lucide="orbit"></i><span>8D Orbit</span><small>Moving panorama</small></button>
-      <button class="preset-btn" data-code="05" data-category="space" data-preset="concert" aria-pressed="false"><i data-lucide="music"></i><span>Concert Hall</span><small>Wide live room</small></button>
-      <button class="preset-btn" data-code="06" data-category="character" data-preset="slowcore" aria-pressed="false"><i data-lucide="cloud-rain"></i><span>Slowcore</span><small>Heavy + spacious</small></button>
-      <button class="preset-btn" data-code="07" data-category="character" data-preset="lofi" aria-pressed="false"><i data-lucide="coffee"></i><span>Lo-Fi</span><small>Soft worn tape</small></button>
-      <button class="preset-btn" data-code="08" data-category="character" data-preset="vaporwave" aria-pressed="false"><i data-lucide="sunset"></i><span>Vaporwave</span><small>Dreamy retro drift</small></button>
-      <button class="preset-btn" data-code="09" data-category="essential" data-preset="phonecall" aria-pressed="false"><i data-lucide="radio"></i><span>Phone Call</span><small>Narrow + crisp</small></button>
-      <button class="preset-btn" data-code="10" data-category="space" data-preset="underwater" aria-pressed="false"><i data-lucide="droplets"></i><span>Underwater</span><small>Deep liquid haze</small></button>
-      <button class="preset-btn" data-code="11" data-category="extreme" data-preset="hyperpop" aria-pressed="false"><i data-lucide="sparkles"></i><span>Hyperpop</span><small>Glossy + electric</small></button>
-      <button class="preset-btn" data-code="12" data-category="space" data-preset="cinematic" aria-pressed="false"><i data-lucide="clapperboard"></i><span>Cinematic</span><small>Large dramatic field</small></button>
-      <button class="preset-btn" data-code="13" data-category="space" data-preset="dreamscape" aria-pressed="false"><i data-lucide="moon-star"></i><span>Dreamscape</span><small>Soft endless air</small></button>
-      <button class="preset-btn" data-code="14" data-category="space" data-preset="cathedral" aria-pressed="false"><i data-lucide="landmark"></i><span>Cathedral</span><small>Massive sacred room</small></button>
-      <button class="preset-btn" data-code="15" data-category="extreme" data-preset="subterranean" aria-pressed="false"><i data-lucide="chevrons-down"></i><span>Subterranean</span><small>Dark seismic weight</small></button>
-      <button class="preset-btn" data-code="16" data-category="character" data-preset="crystal" aria-pressed="false"><i data-lucide="gem"></i><span>Crystal</span><small>Bright detail</small></button>
-      <button class="preset-btn" data-code="17" data-category="extreme" data-preset="alienradio" aria-pressed="false"><i data-lucide="satellite"></i><span>Alien Radio</span><small>Strange transmission</small></button>
-      <button class="preset-btn" data-code="18" data-category="character" data-preset="tapewarmth" aria-pressed="false"><i data-lucide="cassette-tape"></i><span>Tape Warmth</span><small>Rounded analog glow</small></button>
-      <button class="preset-btn" data-code="19" data-category="slowed" data-preset="slowedreverb" aria-pressed="false"><i data-lucide="cloud-moon"></i><span>Slowed + Reverb</span><small>0.85x • balanced space</small></button>
-      <button class="preset-btn" data-code="20" data-category="slowed" data-preset="softslowed" aria-pressed="false"><i data-lucide="feather"></i><span>Soft Slowed</span><small>0.92x • light reverb</small></button>
-      <button class="preset-btn" data-code="21" data-category="slowed" data-preset="deepslowed" aria-pressed="false"><i data-lucide="moon"></i><span>Deep Slowed</span><small>0.75x • deep reverb</small></button>
-          <button class="preset-btn" data-code="22" data-category="slowed" data-preset="ultraslowed" aria-pressed="false"><i data-lucide="cloud-fog"></i><span>Ultra Slowed</span><small>0.65x • huge reverb</small></button>
+      <section class="presets-section glass-card">
+        <div class="preset-toolbar">
+          <div class="section-header"><div><span class="section-kicker">24 FACTORY PRESETS</span><strong>Presets</strong></div></div>
+          <div class="preset-toolbar-actions"><span class="preset-status">Active: <strong id="activePresetName">Normal</strong></span><button class="preset-toggle glass-btn" id="presetToggle" type="button" aria-expanded="false" aria-controls="presetPanel"><span id="presetToggleLabel">Show presets</span><i data-lucide="chevron-down"></i></button></div>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Controls Grid -->
-  <div class="controls-grid player-section">
-
-    <div class="control-group glass-card">
-      <div class="control-header">
-        <div class="control-label"><i data-lucide="gauge"></i><span>Playback Speed</span></div>
-        <span class="control-value" id="speedValue">1.00x</span>
-      </div>
-      <input type="range" id="speedSlider" min="0.25" max="2" step="0.01" value="1">
-    </div>
-
-    <div class="control-group glass-card" id="pitchControlGroup">
-      <div class="control-header">
-        <div class="control-label"><i data-lucide="music-2"></i><span>Pitch Shift</span></div>
-        <div class="pitch-value-row">
-          <div class="pitch-processing-inline" id="pitchProcessingInline" aria-hidden="true">
-            <div class="pitch-spinner-sm"></div>
+        <div class="preset-panel" id="presetPanel" aria-hidden="true" inert>
+          <div class="preset-panel-inner"><div class="preset-filters" role="group" aria-label="Filter presets"><button class="preset-filter active" data-filter="all" type="button">All</button><button class="preset-filter" data-filter="character" type="button">Character</button><button class="preset-filter" data-filter="space" type="button">Spatial</button><button class="preset-filter" data-filter="extreme" type="button">Extreme</button><button class="preset-filter" data-filter="slowed" type="button">Slowed</button><button class="preset-filter" data-filter="voice" type="button">Voice</button></div><div class="presets-grid" id="presetsGrid"></div>
+            <div class="my-presets"><div><h3>My Presets</h3><p>Save the current effect settings on this device.</p></div><div class="preset-save-row"><label for="presetNameInput">Preset name</label><input id="presetNameInput" type="text" maxlength="50" placeholder="My sound"><button class="glass-btn compact-btn" id="savePresetBtn" type="button">Save preset</button></div><div id="myPresetsList" class="my-presets-list"></div></div>
           </div>
-          <span class="control-value" id="pitchValue">0 st</span>
         </div>
-      </div>
-      <input type="range" id="pitchSlider" min="-12" max="12" step="0.1" value="0">
-    </div>
+      </section>
 
-    <div class="control-group glass-card">
-      <div class="control-header">
-        <div class="control-label"><i data-lucide="volume-2"></i><span>Volume</span></div>
-        <span class="control-value" id="volumeValue">100%</span>
-      </div>
-      <input type="range" id="volumeSlider" min="0" max="150" step="0.5" value="100">
-    </div>
+      <div class="editor-panels">
+        <details class="editor-panel glass-card" open>
+          <summary><span><i data-lucide="sliders-horizontal"></i><strong>Basic</strong><small>Tempo, pitch and tone</small></span><i data-lucide="chevron-down"></i></summary>
+          <div class="panel-content control-grid-v3">
+            <label class="control-field"><span>Speed / Tempo <output id="speedValue">1.00x · 100%</output></span><input type="range" id="speedSlider" min="0.25" max="2" step="0.01" value="1"></label>
+            <label class="control-field"><span>Pitch <output id="pitchValue">0 st</output></span><input type="range" id="pitchSlider" min="-12" max="12" step="0.1" value="0"></label>
+            <label class="control-field"><span>Fine Tune <output id="fineTuneValue">0 cents</output></span><input type="range" id="fineTuneSlider" min="-100" max="100" step="1" value="0"></label>
+            <label class="control-field"><span>Monitor Volume <output id="volumeValue">100%</output></span><input type="range" id="volumeSlider" min="0" max="150" step="1" value="100"></label>
+            <label class="control-field"><span>Processing Gain <output id="gainValue">0 dB</output></span><input type="range" id="gainSlider" min="-12" max="12" step="0.1" value="0"></label>
+            <label class="control-field"><span>Bass / Bass Boost <output id="bassValue">0 dB</output></span><input type="range" id="bassSlider" min="-18" max="24" step="0.1" value="0"></label>
+            <label class="control-field"><span>Mid <output id="midValue">0 dB</output></span><input type="range" id="midSlider" min="-18" max="18" step="0.1" value="0"></label>
+            <label class="control-field"><span>Treble <output id="trebleValue">0 dB</output></span><input type="range" id="trebleSlider" min="-18" max="18" step="0.1" value="0"></label>
+            <label class="control-field"><span>Reverb <output id="reverbValue">0%</output></span><input type="range" id="reverbSlider" min="0" max="100" step="1" value="0"></label>
+            <label class="control-field"><span>Echo / Delay <output id="echoValue">0%</output></span><input type="range" id="echoSlider" min="0" max="100" step="1" value="0"></label>
+            <label class="control-field"><span>Pan <output id="panValue">Center</output></span><input type="range" id="panSlider" min="-100" max="100" step="1" value="0"></label>
+            <div class="control-field switch-field"><span>8D Orbit</span><button class="switch" id="eightDToggle" type="button" role="switch" aria-checked="false"><span></span></button><label for="eightDSpeed">Rotation Speed <output id="eightDSpeedValue">2.0</output></label><input type="range" id="eightDSpeed" min="0.5" max="5" step="0.1" value="2" disabled></div>
+            <button class="glass-btn reset-section-btn" id="resetBasicBtn" type="button">Reset Basic</button>
+          </div>
+        </details>
 
-    <div class="control-group glass-card">
-      <div class="control-header">
-        <div class="control-label"><i data-lucide="activity"></i><span>Bass Boost</span></div>
-        <span class="control-value" id="bassValue">0 dB</span>
-      </div>
-      <input type="range" id="bassSlider" min="0" max="20" step="0.1" value="0">
-    </div>
+        <details class="editor-panel glass-card" open>
+          <summary><span><i data-lucide="scissors"></i><strong>Edit</strong><small>Destructive buffer operations</small></span><i data-lucide="chevron-down"></i></summary>
+          <div class="panel-content">
+            <div class="edit-actions"><button id="trimBtn" type="button"><i data-lucide="crop"></i>Trim</button><button id="cutBtn" type="button"><i data-lucide="scissors"></i>Cut</button><button id="copyBtn" type="button"><i data-lucide="copy"></i>Copy</button><button id="pasteBtn" type="button"><i data-lucide="clipboard-paste"></i>Paste</button><button id="deleteBtn" type="button"><i data-lucide="trash-2"></i>Delete</button><button id="fadeInBtn" type="button">Fade In</button><button id="fadeOutBtn" type="button">Fade Out</button><button id="reverseBtn" type="button"><i data-lucide="flip-horizontal-2"></i>Reverse</button><button id="normalizeBtn" type="button"><i data-lucide="audio-lines"></i>Normalize</button></div>
+            <div class="remove-silence-row"><label>Silence Threshold <span><output id="silenceThresholdValue">-45 dB</output><input id="silenceThreshold" type="range" min="-70" max="-20" step="1" value="-45"></span></label><label>Minimum Silence <span><output id="silenceDurationValue">0.50 s</output><input id="silenceDuration" type="range" min="0.2" max="3" step="0.1" value="0.5"></span></label><button class="glass-btn" id="removeSilenceBtn" type="button">Remove Silence</button><small id="silenceEstimate">Analyze a track to estimate removable silence.</small></div>
+          </div>
+        </details>
 
-    <div class="control-group glass-card">
-      <div class="control-header">
-        <div class="control-label"><i data-lucide="bar-chart-2"></i><span>Treble</span></div>
-        <span class="control-value" id="trebleValue">0 dB</span>
-      </div>
-      <input type="range" id="trebleSlider" min="-15" max="15" step="0.1" value="0">
-    </div>
+        <details class="editor-panel glass-card">
+          <summary><span><i data-lucide="waveform"></i><strong>Advanced FX</strong><small>EQ, dynamics and stereo</small></span><i data-lucide="chevron-down"></i></summary>
+          <div class="panel-content advanced-content">
+            <div class="advanced-eq"><div class="subsection-title"><div><strong>Advanced EQ</strong><small>Each enabled band is part of playback and export.</small></div><button class="glass-btn compact-btn" id="resetEqBtn" type="button">Reset EQ</button></div><div id="advancedEqBands" class="eq-band-list"></div></div>
+            <div class="control-grid-v3">
+              <label class="control-field"><span>Vocal Boost <output id="vocalBoostValue">0%</output></span><input type="range" id="vocalBoostSlider" min="0" max="100" step="1" value="0"></label>
+              <label class="control-field"><span>Stereo Width <output id="stereoWidthValue">100%</output></span><input type="range" id="stereoWidthSlider" min="0" max="200" step="1" value="100"></label>
+              <label class="control-field"><span>Distortion Drive <output id="distortionDriveValue">0%</output></span><input type="range" id="distortionDriveSlider" min="0" max="100" step="1" value="0"></label>
+              <label class="control-field"><span>Distortion Mix <output id="distortionMixValue">0%</output></span><input type="range" id="distortionMixSlider" min="0" max="100" step="1" value="0"></label>
+              <div class="control-field switch-field"><span>High-pass Filter</span><button class="switch" id="highPassToggle" type="button" role="switch" aria-checked="false"><span></span></button><label for="highPassFrequency">Frequency <output id="highPassFrequencyValue">80 Hz</output></label><input id="highPassFrequency" type="range" min="20" max="4000" step="10" value="80"></div>
+              <div class="control-field switch-field"><span>Low-pass Filter</span><button class="switch" id="lowPassToggle" type="button" role="switch" aria-checked="false"><span></span></button><label for="lowPassFrequency">Frequency <output id="lowPassFrequencyValue">18000 Hz</output></label><input id="lowPassFrequency" type="range" min="1000" max="20000" step="100" value="18000"></div>
+              <div class="control-field switch-field"><span>Compressor</span><button class="switch" id="compressorToggle" type="button" role="switch" aria-checked="false"><span></span></button><label for="compressorThreshold">Threshold <output id="compressorThresholdValue">-18 dB</output></label><input id="compressorThreshold" type="range" min="-48" max="-3" step="1" value="-18"><label for="compressorRatio">Ratio <output id="compressorRatioValue">3:1</output></label><input id="compressorRatio" type="range" min="1" max="20" step="0.5" value="3"></div>
+              <div class="control-field switch-field"><span>Limiter</span><button class="switch" id="limiterToggle" type="button" role="switch" aria-checked="true"><span></span></button><label for="limiterThresholdSlider">Ceiling <output id="limiterThresholdValue">-1 dB</output></label><select id="limiterThresholdSlider"><option value="-0.1">-0.1 dB</option><option value="-0.5">-0.5 dB</option><option value="-1" selected>-1 dB</option><option value="-2">-2 dB</option></select></div>
+              <button class="glass-btn reset-section-btn" id="resetAdvancedBtn" type="button">Reset Advanced FX</button>
+            </div>
+          </div>
+        </details>
 
-    <div class="control-group glass-card">
-      <div class="control-header">
-        <div class="control-label"><i data-lucide="move-horizontal"></i><span>Stereo Pan</span></div>
-        <span class="control-value" id="panValue">Center</span>
-      </div>
-      <input type="range" id="panSlider" min="-100" max="100" step="0.5" value="0">
-    </div>
+        <details class="editor-panel glass-card">
+          <summary><span><i data-lucide="history"></i><strong>History &amp; Reset</strong><small>Undo, redo and restore</small></span><i data-lucide="chevron-down"></i></summary>
+          <div class="panel-content history-actions"><button class="glass-btn" id="undoBtn" type="button" disabled><i data-lucide="undo-2"></i>Undo</button><button class="glass-btn" id="redoBtn" type="button" disabled><i data-lucide="redo-2"></i>Redo</button><button class="glass-btn" id="resetEffectBtn" type="button">Reset Current Section</button><button class="glass-btn danger-btn" id="resetBtn" type="button"><i data-lucide="refresh-ccw"></i>Reset All</button></div>
+        </details>
 
-    <div class="control-group glass-card">
-      <div class="control-header">
-        <div class="control-label"><i data-lucide="droplets"></i><span>Reverb</span></div>
-        <span class="control-value" id="reverbValue">0%</span>
+        <details class="editor-panel glass-card" open>
+          <summary><span><i data-lucide="download"></i><strong>Export</strong><small>Render the complete processing chain</small></span><i data-lucide="chevron-down"></i></summary>
+          <div class="panel-content export-panel">
+            <fieldset class="format-options-v3"><legend>Format</legend><label><input type="radio" name="exportFormat" value="wav" checked><span><strong>WAV</strong><small>Maximum quality</small></span></label><label><input type="radio" name="exportFormat" value="mp3"><span><strong>MP3</strong><small>Compatible and smaller</small></span></label><label><input type="radio" name="exportFormat" value="flac"><span><strong>FLAC</strong><small>Lossless compression</small></span></label><label><input type="radio" name="exportFormat" value="m4a"><span><strong>M4A/AAC</strong><small>Efficient quality</small></span></label></fieldset>
+            <div class="export-settings-grid"><label for="exportSampleRate">Sample Rate<select id="exportSampleRate"><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option></select></label><label for="exportChannels">Channels<select id="exportChannels"><option value="2">Stereo</option><option value="1">Mono</option></select></label><label id="bitDepthField" for="exportBitDepth">Bit Depth<select id="exportBitDepth"><option value="16">16-bit</option><option value="24">24-bit</option></select></label><label id="bitrateField" for="exportBitrate" hidden>Bitrate<select id="exportBitrate"><option value="128">128 kbps</option><option value="192" selected>192 kbps</option><option value="256">256 kbps</option><option value="320">320 kbps</option></select></label><label class="filename-field" for="exportFilename">Filename<input id="exportFilename" type="text" value="audio-edited.wav" maxlength="120" autocomplete="off"></label></div>
+            <button class="download-btn glass-btn" id="downloadBtn" type="button"><i data-lucide="download"></i><span>Export audio</span></button>
+          </div>
+        </details>
       </div>
-      <input type="range" id="reverbSlider" min="0" max="100" step="0.5" value="0">
-    </div>
-
-    <div class="control-group glass-card">
-      <div class="control-header">
-        <div class="control-label"><i data-lucide="repeat"></i><span>Echo / Delay</span></div>
-        <span class="control-value" id="echoValue">0%</span>
-      </div>
-      <input type="range" id="echoSlider" min="0" max="100" step="0.5" value="0">
-    </div>
-
-    <div class="control-group glass-card toggle-card">
-      <div class="control-header">
-        <div class="control-label"><i data-lucide="infinity"></i><span>8D Audio</span></div>
-        <div class="toggle" id="eightDToggle" role="switch" aria-checked="false" tabindex="0">
-          <div class="toggle-thumb"></div>
-        </div>
-      </div>
-      <div class="speed-control">
-        <label>Rotation Speed</label>
-        <input type="range" id="eightDSpeed" min="0.5" max="5" step="0.1" value="2">
-        <span class="control-value" id="eightDSpeedValue">2.0</span>
-      </div>
-    </div>
-
+    </main>
   </div>
 
-</div>
+  <div class="preset-toast" id="presetToast" aria-live="polite" aria-atomic="true"><span class="preset-toast-icon"><i data-lucide="sparkles"></i></span><span><small>PRESET ACTIVATED</small><strong id="presetToastName">Normal</strong></span></div>
 
-<div class="preset-toast" id="presetToast" aria-live="polite" aria-atomic="true">
-  <span class="preset-toast-icon"><i data-lucide="sparkles"></i></span>
-  <span><small>PRESET ACTIVATED</small><strong id="presetToastName">Normal</strong></span>
-</div>
-
-<!-- Hidden compatibility inputs -->
-<div style="display:none">
-  <input type="range" id="preGainSlider" value="-9">
-  <span id="preGainValue"></span>
-  <input type="range" id="outputGainSlider" value="-1">
-  <span id="outputGainValue"></span>
-  <div id="limiterToggle" class="toggle active"></div>
-  <input type="range" id="limiterThresholdSlider" value="-6">
-  <span id="limiterThresholdValue"></span>
-  <div id="meterFill"></div>
-  <div id="meterPeak"></div>
-  <span id="peakValue"></span>
-  <span id="rmsValue"></span>
-  <div id="clipIndicator"></div>
-</div>
-
-<script>
-(function(){
-  const t=document.querySelector('[data-theme-toggle]');
-  const r=document.documentElement;
-  let d=r.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
-  r.setAttribute('data-theme',d);
-  function updateIcon(){
-    if(!t)return;
-    t.innerHTML=d==='dark'
-      ?'<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>'
-      :'<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
-  }
-  updateIcon();
-  if(t)t.addEventListener('click',()=>{
-    d=d==='dark'?'light':'dark';
-    r.setAttribute('data-theme',d);
-    updateIcon();
-  });
-})();
-</script>
-
-<script
-  src="https://unpkg.com/@wasm-audio-decoders/flac@0.2.10/dist/flac-decoder.min.js"
-  charset="UTF-8"
-  integrity="sha384-tciqShB7iuowinoNxgDdys4blXjmhgoOs2OuG0oXoxPlQtuAqPnaFiZy5w17NvVT"
-  crossorigin="anonymous"></script>
-<script src="script.js?v=20260810-8"></script>
+  <script>
+  (function(){const button=document.querySelector('[data-theme-toggle]');const root=document.documentElement;let theme=root.getAttribute('data-theme')||'dark';function update(){root.setAttribute('data-theme',theme);if(button)button.setAttribute('aria-label',theme==='dark'?'Switch to light mode':'Switch to dark mode')}update();if(button)button.addEventListener('click',function(){theme=theme==='dark'?'light':'dark';update()})})();
+  </script>
+  <script src="https://unpkg.com/@wasm-audio-decoders/flac@0.2.10/dist/flac-decoder.min.js" charset="UTF-8" integrity="sha384-tciqShB7iuowinoNxgDdys4blXjmhgoOs2OuG0oXoxPlQtuAqPnaFiZy5w17NvVT" crossorigin="anonymous"></script>
+  <script src="vendor/mediabunny-1.53.0/mediabunny.min.js"></script>
+  <script src="vendor/mediabunny-1.53.0/mediabunny-aac-encoder.min.js"></script>
+  <script src="vendor/mediabunny-1.53.0/mediabunny-flac-encoder.min.js"></script>
+  <script src="audio-editor-core.js?v=20260810-1"></script>
+  <script src="audio-engine.js?v=20260810-1"></script>
+  <script src="export-engine.js?v=20260810-1"></script>
+  <script src="script.js?v=20260810-9"></script>
 </body>
 </html>
