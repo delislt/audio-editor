@@ -51,17 +51,41 @@ Mediabunny and its codec extensions are version-pinned under `vendor/mediabunny-
 
 Tone.js granular synthesis was selected because the existing project already depends on Tone.js and its `GrainPlayer` independently controls `playbackRate` and `detune`. Dedicated WebAssembly encoders were added only where browser APIs do not provide portable static-site encoding.
 
-## Development and tests
+## Development and verification
 
-No compilation is required.
+No compilation or dependency installation is required. The repository has no lockfile and `package.json` contains no dependencies.
+
+### Prerequisites
+
+- Node.js with support for `node --test`. A specific Node version is not pinned.
+- Python 3 if you want to run the documented local static server.
+
+### Run locally
+
+From the repository root:
+
+```sh
+python3 -m http.server 4173
+```
+
+Open `http://localhost:4173/`. Use the HTTP server instead of opening `index.html` through a `file://` URL so asset loading is closer to GitHub Pages.
+
+### Automated checks
 
 ```sh
 npm test
 npm run check
-python3 -m http.server 4173
 ```
 
-The Node test suite covers selection and waveform coordinate conversions, buffer editing, sample-rate/channel-aware paste, fades, reverse, normalization, silence removal, bounded history, filenames, presets, dB conversions and export settings.
+- `npm test` runs `node --test tests/*.test.js`.
+- `npm run check` syntax-checks `script.js`, `audio-editor-core.js`, `audio-engine.js` and `export-engine.js`.
+- The test suite covers selection and waveform coordinates, buffer editing, sample-rate/channel-aware paste, fades, reverse, normalization, silence removal, bounded history, filenames, presets, dB conversions, export settings, DOM references and static dependency order.
+
+This repository does not currently define build, lint, formatting, type-check or end-to-end browser-test commands. It also has no checked-in GitHub Actions workflow.
+
+### Browser smoke test
+
+For user-facing or audio changes, load an audio file in a desktop browser and verify the affected controls, playback and at least one affected export format. Changes involving responsive behavior or audio-session startup should also be checked on a narrow viewport and, when available, mobile Safari.
 
 ## Keyboard shortcuts
 
