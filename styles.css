@@ -1136,6 +1136,9 @@ body::before {
   -webkit-background-clip: text;
   -webkit-text-stroke: 0;
   filter: drop-shadow(0 0 26px rgba(139,92,246,.18));
+  display: inline-block;
+  padding-inline-end: .12em;
+  margin-inline-end: -.12em;
 }
 [data-theme="light"] .hero h1 span { filter: none; }
 
@@ -1541,7 +1544,7 @@ input[type="range"]::-webkit-slider-thumb {
 
 @media (max-width: 390px) {
   .brand-meta { display: none; }
-  .hero h1 { font-size: 2.75rem; }
+  .hero h1 { font-size: clamp(2.35rem, 12vw, 2.75rem); }
   .hero-features { gap: 6px; }
   .hero-features span { font-size: .62rem; }
 }
