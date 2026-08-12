@@ -12,12 +12,14 @@ Live site: https://delislt.github.io/audio-editor/
 - Zoomable and horizontally scrollable waveform with touch, pen and mouse selection.
 - Trim, cut, copy, paste, delete, reverse, fade in, fade out, normalize and remove silence.
 - Bounded Undo/Redo history and immutable original audio for Reset All and Original/Modified comparison.
-- Independent Speed/Tempo and Pitch through Tone.js granular synthesis, with a dry player bypass at neutral values.
+- Independent Speed/Tempo and Pitch through Tone.js granular synthesis, with adaptive grain windows for smoother slowed audio and a dry player bypass at neutral values.
 - Fine tuning in cents, processing gain, Bass/Mid/Treble and five configurable advanced EQ bands.
 - Reverb, echo, pan, 8D orbit, vocal boost, stereo width, distortion, high-pass, low-pass, compressor and limiter.
-- 22 original factory presets plus Vocal Boost and Podcast.
+- 24 complete factory presets, including four progressively slowed profiles tuned for cleaner ambience.
 - Versioned custom presets stored locally with save, apply, rename and delete actions.
 - Output metering with peak, RMS and clipping indication after the processing chain.
+- Full-track automatic clipping protection that adjusts processing gain only when necessary and enables a -1 dB limiter.
+- Persistent Simple and Studio layouts plus a compact workspace menu for navigating the editor panels.
 - Offline export that uses the same effect graph as playback.
 - Real WAV 16/24-bit, MP3, FLAC and M4A/AAC output with sample-rate, channel, bitrate and filename settings.
 - No backend or build step. The project remains deployable directly to GitHub Pages.

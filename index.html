@@ -16,7 +16,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=20260812-1">
+  <link rel="stylesheet" href="styles.css?v=20260812-2">
 </head>
 <body>
   <div class="ambient" aria-hidden="true">
@@ -124,11 +124,20 @@
         </div>
       </section>
 
+      <nav class="workspace-nav glass-card" aria-label="Editor sections">
+        <span class="workspace-nav-label"><i data-lucide="panel-top"></i>Workspace</span>
+        <button class="active" type="button" data-panel-target="basicPanel" aria-controls="basicPanel"><i data-lucide="sliders-horizontal"></i><span>Controls</span></button>
+        <button class="studio-only-nav" type="button" data-panel-target="editPanel" aria-controls="editPanel"><i data-lucide="scissors"></i><span>Edit</span></button>
+        <button class="studio-only-nav" type="button" data-panel-target="advancedPanel" aria-controls="advancedPanel"><i data-lucide="audio-waveform"></i><span>FX</span></button>
+        <button class="studio-only-nav" type="button" data-panel-target="historyPanel" aria-controls="historyPanel"><i data-lucide="history"></i><span>History</span></button>
+        <button type="button" data-panel-target="exportPanel" aria-controls="exportPanel"><i data-lucide="download"></i><span>Export</span></button>
+      </nav>
+
       <div class="editor-panels">
-        <details class="editor-panel glass-card basic-editor-panel" open>
+        <details id="basicPanel" class="editor-panel glass-card basic-editor-panel" open>
           <summary><span><i data-lucide="sliders-horizontal"></i><strong>Basic</strong><small>Tempo, pitch and tone</small></span><i data-lucide="chevron-down"></i></summary>
           <div class="panel-content control-grid-v3">
-            <label class="control-field"><span>Speed / Tempo <output id="speedValue">1.00x · 100%</output></span><input type="range" id="speedSlider" min="0.25" max="2" step="0.01" value="1"></label>
+            <div class="control-field tempo-control"><label for="speedSlider">Speed / Tempo <output id="speedValue">1.00x · 100%</output></label><input type="range" id="speedSlider" min="0.25" max="2" step="0.01" value="1" aria-describedby="tempoQualityHint"><small class="control-note" id="tempoQualityHint">Adaptive smoothing keeps slowed playback natural.</small><div class="tempo-shortcuts" role="group" aria-label="Speed shortcuts"><button type="button" data-speed-value="0.75">0.75x</button><button type="button" data-speed-value="0.85">0.85x</button><button type="button" data-speed-value="1">1.00x</button><button type="button" data-speed-value="1.25">1.25x</button></div></div>
             <label class="control-field"><span>Pitch <output id="pitchValue">0 st</output></span><input type="range" id="pitchSlider" min="-12" max="12" step="0.1" value="0"></label>
             <label class="control-field studio-only-control"><span>Fine Tune <output id="fineTuneValue">0 cents</output></span><input type="range" id="fineTuneSlider" min="-100" max="100" step="1" value="0"></label>
             <label class="control-field"><span>Monitor Volume <output id="volumeValue">100%</output></span><input type="range" id="volumeSlider" min="0" max="150" step="1" value="100"></label>
@@ -144,7 +153,7 @@
           </div>
         </details>
 
-        <details class="editor-panel glass-card studio-only-panel" open>
+        <details id="editPanel" class="editor-panel glass-card studio-only-panel">
           <summary><span><i data-lucide="scissors"></i><strong>Edit</strong><small>Destructive buffer operations</small></span><i data-lucide="chevron-down"></i></summary>
           <div class="panel-content">
             <div class="edit-actions"><button id="trimBtn" type="button"><i data-lucide="crop"></i>Trim</button><button id="cutBtn" type="button"><i data-lucide="scissors"></i>Cut</button><button id="copyBtn" type="button"><i data-lucide="copy"></i>Copy</button><button id="pasteBtn" type="button"><i data-lucide="clipboard-paste"></i>Paste</button><button id="deleteBtn" type="button"><i data-lucide="trash-2"></i>Delete</button><button id="fadeInBtn" type="button">Fade In</button><button id="fadeOutBtn" type="button">Fade Out</button><button id="reverseBtn" type="button"><i data-lucide="flip-horizontal-2"></i>Reverse</button><button id="normalizeBtn" type="button"><i data-lucide="audio-lines"></i>Normalize</button></div>
@@ -152,7 +161,7 @@
           </div>
         </details>
 
-        <details class="editor-panel glass-card studio-only-panel">
+        <details id="advancedPanel" class="editor-panel glass-card studio-only-panel">
           <summary><span><i data-lucide="audio-waveform"></i><strong>Advanced FX</strong><small>EQ, dynamics and stereo</small></span><i data-lucide="chevron-down"></i></summary>
           <div class="panel-content advanced-content">
             <div class="advanced-eq"><div class="subsection-title"><div><strong>Advanced EQ</strong><small>Each enabled band is part of playback and export.</small></div><button class="glass-btn compact-btn" id="resetEqBtn" type="button">Reset EQ</button></div><div id="advancedEqBands" class="eq-band-list"></div></div>
@@ -170,12 +179,12 @@
           </div>
         </details>
 
-        <details class="editor-panel glass-card studio-only-panel">
+        <details id="historyPanel" class="editor-panel glass-card studio-only-panel">
           <summary><span><i data-lucide="history"></i><strong>History &amp; Reset</strong><small>Undo, redo and restore</small></span><i data-lucide="chevron-down"></i></summary>
           <div class="panel-content history-actions"><button class="glass-btn" id="undoBtn" type="button" disabled><i data-lucide="undo-2"></i>Undo</button><button class="glass-btn" id="redoBtn" type="button" disabled><i data-lucide="redo-2"></i>Redo</button><button class="glass-btn" id="resetEffectBtn" type="button" disabled>Reset Last Effect</button><button class="glass-btn danger-btn" id="resetBtn" type="button"><i data-lucide="refresh-ccw"></i>Reset All</button></div>
         </details>
 
-        <details class="editor-panel glass-card export-editor-panel" open>
+        <details id="exportPanel" class="editor-panel glass-card export-editor-panel">
           <summary><span><i data-lucide="download"></i><strong>Export</strong><small>Render the complete processing chain</small></span><i data-lucide="chevron-down"></i></summary>
           <div class="panel-content export-panel">
             <fieldset class="format-options-v3"><legend>Format</legend><label><input type="radio" name="exportFormat" value="wav" checked><span><strong>WAV</strong><small>Maximum quality</small></span></label><label><input type="radio" name="exportFormat" value="mp3"><span><strong>MP3</strong><small>Compatible and smaller</small></span></label><label><input type="radio" name="exportFormat" value="flac"><span><strong>FLAC</strong><small>Lossless compression</small></span></label><label><input type="radio" name="exportFormat" value="m4a"><span><strong>M4A/AAC</strong><small>Efficient quality</small></span></label></fieldset>
@@ -197,8 +206,8 @@
   <script src="vendor/mediabunny-1.53.0/mediabunny-aac-encoder.min.js"></script>
   <script src="vendor/mediabunny-1.53.0/mediabunny-flac-encoder.min.js"></script>
   <script src="audio-editor-core.js?v=20260812-1"></script>
-  <script src="audio-engine.js?v=20260810-1"></script>
-  <script src="export-engine.js?v=20260810-1"></script>
-  <script src="script.js?v=20260812-1"></script>
+  <script src="audio-engine.js?v=20260812-2"></script>
+  <script src="export-engine.js?v=20260812-2"></script>
+  <script src="script.js?v=20260812-2"></script>
 </body>
 </html>

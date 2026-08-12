@@ -27,6 +27,24 @@
     return Math.pow(10, Number(db) / 20);
   }
 
+  function granularPlaybackOptions(state) {
+    const effects = state || {};
+    const playbackRate = clamp(effects.speed, 0.25, 2);
+    const detune = clamp(effects.pitch, -12, 12) * 100 + clamp(effects.fineTune, -100, 100);
+    const slowDepth = clamp((1 - playbackRate) / 0.75, 0, 1);
+    const fastDepth = clamp(playbackRate - 1, 0, 1);
+    const pitchDepth = clamp(Math.abs(detune) / 1300, 0, 1);
+    const grainSize = clamp(0.2 + slowDepth * 0.18 - fastDepth * 0.06 + pitchDepth * 0.035, 0.14, 0.42);
+    const overlap = clamp(grainSize * (0.5 + slowDepth * 0.08), 0.07, 0.24);
+    return {
+      playbackRate,
+      detune,
+      grainSize: Number(grainSize.toFixed(3)),
+      overlap: Number(overlap.toFixed(3)),
+      loop: false,
+    };
+  }
+
   function isIOSDevice() {
     if (!root || !root.navigator) return false;
     return /iPad|iPhone|iPod/.test(root.navigator.userAgent)
@@ -379,8 +397,11 @@
       this.effectState = state;
       updateGraphValues(this.graph, state);
       if (this.sourceKind === 'grain' && this.source) {
-        this.source.playbackRate = clamp(state.speed, 0.25, 2);
-        this.source.detune = clamp(state.pitch, -12, 12) * 100 + clamp(state.fineTune, -100, 100);
+        const granular = granularPlaybackOptions(state);
+        this.source.playbackRate = granular.playbackRate;
+        this.source.detune = granular.detune;
+        this.source.grainSize = granular.grainSize;
+        this.source.overlap = granular.overlap;
       }
       if (this.monitorGain) this.monitorGain.gain.value = clamp(state.volume, 0, 150) / 100;
     }
@@ -430,9 +451,8 @@
 
     sourceNeedsGranular() {
       if (this.compareMode === 'original') return false;
-      const state = this.effectState || {};
-      const pitchCents = clamp(state.pitch, -12, 12) * 100 + clamp(state.fineTune, -100, 100);
-      return Math.abs(clamp(state.speed, 0.25, 2) - 1) > 0.0001 || Math.abs(pitchCents) > 0.01;
+      const granular = granularPlaybackOptions(this.effectState);
+      return Math.abs(granular.playbackRate - 1) > 0.0001 || Math.abs(granular.detune) > 0.01;
     }
 
     createSource() {
@@ -441,14 +461,10 @@
       if (!buffer) throw new Error('Load an audio file first.');
       this.disposeSource();
       if (this.sourceNeedsGranular()) {
-        const state = this.effectState || {};
+        const granular = granularPlaybackOptions(this.effectState);
         this.source = new Tone.GrainPlayer({
           url: buffer,
-          playbackRate: clamp(state.speed, 0.25, 2),
-          detune: clamp(state.pitch, -12, 12) * 100 + clamp(state.fineTune, -100, 100),
-          grainSize: 0.12,
-          overlap: 0.045,
-          loop: false,
+          ...granular,
         });
         this.sourceKind = 'grain';
       } else {
@@ -554,6 +570,7 @@
     AudioEngine,
     createToneEffectGraph,
     disposeToneGraph,
+    granularPlaybackOptions,
     isIOSDevice,
     mapFilterType,
     updateGraphValues,
