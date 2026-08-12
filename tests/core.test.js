@@ -139,6 +139,10 @@ test('preset serialization is versioned and rejects incompatible data', () => {
 
 test('dB conversions and export settings validation stay finite', () => {
   assert.ok(Math.abs(core.gainToDb(core.dbToGain(-6)) + 6) < 1e-9);
+  assert.equal(core.protectiveGainDb(0, 3, -1), -4.2);
+  assert.equal(core.protectiveGainDb(-3, -4, -1), -3);
+  assert.equal(core.protectiveGainDb(4, 30, -1), -12);
+  assert.equal(core.protectiveGainDb(-2, Number.NaN, -1), -2);
   assert.deepEqual(core.validateExportSettings({ format: 'flac', sampleRate: 48000, channels: 1, bitDepth: 24, bitrate: 256 }), {
     format: 'flac', sampleRate: 48000, channels: 1, bitDepth: 24, bitrate: 256,
   });

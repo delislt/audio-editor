@@ -23,6 +23,14 @@
     return 20 * Math.log10(value);
   }
 
+  function protectiveGainDb(currentGainDb, measuredPeakDb, targetPeakDb) {
+    const current = clamp(currentGainDb, -12, 12);
+    const peak = Number(measuredPeakDb);
+    const target = clamp(targetPeakDb, -12, -0.1);
+    if (!Number.isFinite(peak) || peak <= target) return current;
+    return clamp(current + target - peak - 0.2, -12, 12);
+  }
+
   function assertBufferData(buffer) {
     if (!buffer || !Number.isFinite(buffer.sampleRate) || buffer.sampleRate <= 0) {
       throw new Error('Invalid audio sample rate.');
@@ -528,6 +536,7 @@
     normalizeSelection,
     parsePresetCollection,
     pasteBuffer,
+    protectiveGainDb,
     removeSilence,
     reverseBuffer,
     sanitizeBaseName,

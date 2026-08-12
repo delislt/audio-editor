@@ -54,13 +54,33 @@ test('factory presets and accessible effect switches remain available', () => {
   assert.equal(presetCount, 24);
   ['Normal', 'Nightcore', 'Deep Bass', '8D Orbit', 'Vocal Boost', 'Podcast']
     .forEach((label) => assert.ok(factoryBlock[1].includes(`label: '${label}'`)));
+  assert.equal([...factoryBlock[1].matchAll(/factoryPreset\(/g)].length, 24);
+  ['fineTune', 'gainDb', 'mid', 'advancedEq', 'vocalBoost', 'stereoWidth', 'distortionDrive', 'highPassEnabled', 'compressorEnabled']
+    .forEach((property) => assert.ok(factoryBlock[1].includes(property), `${property} is not used by the factory presets`));
   ['eightDToggle', 'highPassToggle', 'lowPassToggle', 'compressorToggle', 'limiterToggle']
     .forEach((id) => assert.match(html, new RegExp(`id="${id}"[^>]+aria-label="[^"]+"`)));
   assert.match(html, /id="resetEffectBtn"[^>]+disabled>Reset Last Effect/);
 });
 
+test('simple mode and automatic clipping protection are wired accessibly', () => {
+  assert.match(html, /id="simpleModeBtn"[^>]+aria-pressed="false"/);
+  assert.match(html, /id="studioModeBtn"[^>]+aria-pressed="true"/);
+  assert.match(html, /id="autoProtectBtn"[^>]+aria-describedby="autoProtectHint"/);
+  assert.match(script, /audio-editor-ui-mode-v1/);
+  assert.match(script, /function setEditorMode\(/);
+  assert.match(script, /function autoProtectFromClipping\(/);
+  assert.match(script, /ExportApi\.renderProcessedAudio/);
+  assert.match(script, /Core\.protectiveGainDb/);
+  assert.match(styles, /\.simple-mode \.studio-only-panel/);
+});
+
+test('hero and preset summaries retain unclipped stacked layouts', () => {
+  assert.match(html, /section-header section-header-rich/);
+  assert.match(html, /class="preset-status" aria-live="polite"><span>ACTIVE PRESET<\/span>/);
+  assert.match(styles, /\.hero h1 \{[\s\S]*?line-height: \.96;/);
+  assert.match(styles, /\.preset-toolbar \.section-header-rich > div \{[\s\S]*?display: grid;/);
+});
+
 test('mobile layout clips decorative hero art instead of widening the page', () => {
-  const mobileBlock = styles.match(/@media \(max-width: 600px\) \{([\s\S]*?)\n\}/g)?.at(-1);
-  assert.ok(mobileBlock, 'mobile editor styles are missing');
-  assert.match(mobileBlock, /\.hero \{ overflow: hidden; \}/);
+  assert.match(styles, /@media \(max-width: 600px\) \{[\s\S]*?\.hero \{ overflow: hidden; \}/);
 });
