@@ -67,7 +67,7 @@
     originalData: null, workingData: null, originalBuffer: null, workingBuffer: null,
     clipboard: null, selection: null, playhead: 0, zoom: 1, compareMode: 'modified',
     effects: defaultEffects(), history: new Core.AudioHistory({ maxEntries: 12, maxBytes: 256 * 1024 * 1024 }),
-    file: null, activePreset: 'normal', userPresets: [], draggingSelection: false,
+    file: null, activePreset: 'normal', userPresets: [], lastEffectKeys: [], draggingSelection: false,
     pointerStartX: 0, pointerStartTime: 0, animationFrame: 0, transportRestartTimer: 0,
     lastSection: 'basic', loading: false, exporting: false,
   };
@@ -113,6 +113,7 @@
     $('processingText').textContent = text || 'Processing audio...';
     $('processingProgress').value = Number.isFinite(percent) ? percent : 0;
     document.body.classList.toggle('is-processing', active);
+    document.body.setAttribute('aria-busy', String(Boolean(active)));
   }
 
   function nativeToData(buffer) {
@@ -128,6 +129,10 @@
   }
 
   function currentDuration() { return state.workingData ? Core.bufferDuration(state.workingData) : 0; }
+  function isBusy() { return state.loading || state.exporting; }
+  function showBusyMessage() {
+    showMessage(state.exporting ? 'Wait for the export to finish.' : 'Wait for the current operation to finish.', 'error', 2500);
+  }
   function playbackDuration() {
     return state.compareMode === 'original' && state.originalBuffer ? state.originalBuffer.duration : currentDuration();
   }
@@ -158,7 +163,8 @@
     updateAfterBufferChange();
   }
 
-  function performEdit(label, operation) {
+  function performEdit(label, operation, allowWhileProcessing) {
+    if (isBusy() && !allowWhileProcessing) return showBusyMessage();
     if (!state.workingData) return showMessage('Load an audio file first.', 'error');
     try {
       const previous = currentSnapshot(label);
@@ -174,9 +180,10 @@
   }
 
   async function performHeavyEdit(label, operation) {
+    if (isBusy()) return showBusyMessage();
     setProcessing(true, `${label}...`, 25);
     await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
-    try { performEdit(label, operation); } finally { setProcessing(false); }
+    try { performEdit(label, operation, true); } finally { setProcessing(false); }
   }
 
   function updateHistoryButtons() {
@@ -412,11 +419,18 @@
     ['compressorRatio', 'compressorRatio', 'compressorRatioValue', (v) => `${v.toFixed(1)}:1`, 'advanced'],
   ];
 
-  function markCustom(section) {
+  function updateResetEffectButton() {
+    const button = $('resetEffectBtn');
+    if (button) button.disabled = !state.lastEffectKeys.length;
+  }
+
+  function markCustom(section, effectKeys) {
     state.lastSection = section || state.lastSection;
+    state.lastEffectKeys = Array.isArray(effectKeys) ? effectKeys.slice() : [];
     state.activePreset = 'custom';
     $('activePresetName').textContent = 'Custom';
     document.querySelectorAll('.preset-btn').forEach((button) => { button.classList.remove('active'); button.setAttribute('aria-pressed', 'false'); });
+    updateResetEffectButton();
   }
 
   function scheduleTransportRestart() {
@@ -434,16 +448,17 @@
     EFFECT_BINDINGS.forEach(([inputId, key, outputId, formatter, section]) => {
       const input = $(inputId);
       input.addEventListener('input', () => {
+        if (isBusy()) { syncEffectsToUI(); return showBusyMessage(); }
         state.effects[key] = Number(input.value);
         $(outputId).textContent = formatter(state.effects[key]);
         updateRangeFill(input);
-        markCustom(section === 'advanced' ? 'advanced' : 'basic');
+        markCustom(section === 'advanced' ? 'advanced' : 'basic', [key]);
         if (section === 'transport') scheduleTransportRestart();
         else engine.setEffectState(state.effects);
       });
     });
     const limiterSelect = $('limiterThresholdSlider');
-    limiterSelect.addEventListener('change', () => { state.effects.limiterThreshold = Number(limiterSelect.value); $('limiterThresholdValue').textContent = `${limiterSelect.value} dB`; markCustom('advanced'); engine.setEffectState(state.effects); });
+    limiterSelect.addEventListener('change', () => { if (isBusy()) { syncEffectsToUI(); return showBusyMessage(); } state.effects.limiterThreshold = Number(limiterSelect.value); $('limiterThresholdValue').textContent = `${limiterSelect.value} dB`; markCustom('advanced', ['limiterThreshold']); engine.setEffectState(state.effects); });
   }
 
   function setSwitch(id, active) {
@@ -454,10 +469,11 @@
 
   function bindSwitch(id, key, options) {
     $(id).addEventListener('click', async () => {
+      if (isBusy()) return showBusyMessage();
       state.effects[key] = !state.effects[key];
       setSwitch(id, state.effects[key]);
       if (options && options.control) $(options.control).disabled = !state.effects[key];
-      markCustom(options && options.section || 'advanced');
+      markCustom(options && options.section || 'advanced', [key]);
       engine.setEffectState(state.effects);
       if (options && options.rebuild) {
         try { await engine.rebuildGraph(); } catch (error) { showMessage(error.message, 'error'); }
@@ -475,13 +491,14 @@
       row.innerHTML = `<label class="eq-enable"><input type="checkbox" ${band.enabled ? 'checked' : ''}><span>Band ${index + 1}</span></label><label>Type<select data-field="type"><option value="bell">Bell</option><option value="lowshelf">Low Shelf</option><option value="highshelf">High Shelf</option><option value="lowcut">Low Cut</option><option value="highcut">High Cut</option></select></label><label>Frequency<input data-field="frequency" type="number" min="20" max="20000" step="10" value="${band.frequency}"></label><label>Gain<input data-field="gain" type="number" min="-18" max="18" step="0.5" value="${band.gain}"></label><label>Q<input data-field="q" type="number" min="0.1" max="18" step="0.1" value="${band.q}"></label>`;
       row.querySelector('[data-field="type"]').value = band.type;
       const commit = async (rebuild) => {
+        if (isBusy()) return showBusyMessage();
         band.enabled = row.querySelector('.eq-enable input').checked;
         band.type = row.querySelector('[data-field="type"]').value;
         band.frequency = Core.clamp(row.querySelector('[data-field="frequency"]').value, 20, 20000);
         band.gain = Core.clamp(row.querySelector('[data-field="gain"]').value, -18, 18);
         band.q = Core.clamp(row.querySelector('[data-field="q"]').value, .1, 18);
         row.classList.toggle('enabled', band.enabled);
-        markCustom('advanced');
+        markCustom('advanced', ['advancedEq']);
         engine.setEffectState(state.effects);
         if (rebuild) await engine.rebuildGraph();
       };
@@ -508,15 +525,18 @@
   }
 
   async function applyEffects(nextEffects, presetKey, label, colors) {
+    if (isBusy()) return showBusyMessage();
     const wasPlaying = engine.playing;
     const position = wasPlaying ? engine.currentOffset() : state.playhead;
     engine.stop(false);
     state.effects = normalizeEffects(nextEffects);
     state.activePreset = presetKey || 'custom';
+    state.lastEffectKeys = [];
     engine.setEffectState(state.effects);
     syncEffectsToUI();
     $('activePresetName').textContent = label || 'Custom';
     document.querySelectorAll('.preset-btn').forEach((button) => { const active = button.dataset.preset === presetKey; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
+    updateResetEffectButton();
     if (colors) { document.documentElement.style.setProperty('--vibe-primary', colors[0]); document.documentElement.style.setProperty('--vibe-secondary', colors[1]); }
     try { await engine.rebuildGraph(); if (wasPlaying) { await engine.play(position); playbackLoop(); } } catch (error) { showMessage(error.message, 'error'); }
   }
@@ -551,7 +571,37 @@
       const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'my-preset-apply'; apply.textContent = preset.name;
       apply.addEventListener('click', () => { applyEffects(preset.effects, preset.id, preset.name); showPresetToast(preset.name); });
       const rename = document.createElement('button'); rename.type = 'button'; rename.className = 'icon-action'; rename.setAttribute('aria-label', `Rename ${preset.name}`); rename.innerHTML = '<i data-lucide="pencil"></i>';
-      rename.addEventListener('click', () => { const name = window.prompt('Rename preset', preset.name); if (!name || !name.trim()) return; preset.name = name.trim().slice(0, 48); saveUserPresets(); renderUserPresets(); if (window.lucide) window.lucide.createIcons(); });
+      rename.addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.className = 'my-preset-rename-input';
+        input.value = preset.name;
+        input.maxLength = 48;
+        input.setAttribute('aria-label', `Rename ${preset.name}`);
+        row.replaceChild(input, apply);
+        rename.hidden = true;
+        remove.hidden = true;
+        let finished = false;
+        const finish = (save) => {
+          if (finished) return;
+          finished = true;
+          const name = input.value.trim();
+          if (save && name) {
+            preset.name = name.slice(0, 48);
+            saveUserPresets();
+          } else if (save) {
+            showMessage('Enter a preset name.', 'error');
+          }
+          renderUserPresets();
+          if (window.lucide) window.lucide.createIcons();
+        };
+        input.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+          else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+        });
+        input.addEventListener('blur', () => finish(true), { once: true });
+        input.focus();
+        input.select();
+      });
       const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'icon-action danger'; remove.setAttribute('aria-label', `Delete ${preset.name}`); remove.innerHTML = '<i data-lucide="trash-2"></i>';
       remove.addEventListener('click', () => { state.userPresets = state.userPresets.filter((item) => item.id !== preset.id); saveUserPresets(); renderUserPresets(); if (window.lucide) window.lucide.createIcons(); });
       row.append(apply, rename, remove); list.appendChild(row);
@@ -652,7 +702,7 @@
   }
 
   function bindEditing() {
-    $('copyBtn').addEventListener('click', () => { try { state.clipboard = Core.copyRange(state.workingData, state.selection); updateSelectionUI(); showMessage('Selection copied to the editor clipboard.', 'success'); } catch (error) { showMessage(error.message, 'error'); } });
+    $('copyBtn').addEventListener('click', () => { if (isBusy()) return showBusyMessage(); try { state.clipboard = Core.copyRange(state.workingData, state.selection); updateSelectionUI(); showMessage('Selection copied to the editor clipboard.', 'success'); } catch (error) { showMessage(error.message, 'error'); } });
     $('trimBtn').addEventListener('click', () => performEdit('Trim', () => ({ buffer: Core.trimBuffer(state.workingData, state.selection), selection: null, playhead: 0 })));
     $('cutBtn').addEventListener('click', () => performEdit('Cut', () => { state.clipboard = Core.copyRange(state.workingData, state.selection); const start = Core.normalizeSelection(state.selection, currentDuration()).start; return { buffer: Core.deleteRange(state.workingData, state.selection), selection: null, playhead: start }; }));
     $('deleteBtn').addEventListener('click', () => performEdit('Delete selection', () => { const start = Core.normalizeSelection(state.selection, currentDuration()).start; return { buffer: Core.deleteRange(state.workingData, state.selection), selection: null, playhead: start }; }));
@@ -662,8 +712,8 @@
     $('fadeOutBtn').addEventListener('click', () => performHeavyEdit('Fade Out', () => ({ buffer: Core.fadeBuffer(state.workingData, state.selection, 'out', 3), selection: state.selection, playhead: state.playhead })));
     $('normalizeBtn').addEventListener('click', () => performHeavyEdit('Peak normalization', () => ({ buffer: Core.normalizeBuffer(state.workingData, -1), selection: state.selection, playhead: state.playhead })));
     $('removeSilenceBtn').addEventListener('click', () => performHeavyEdit('Remove Silence', () => { const result = Core.removeSilence(state.workingData, { thresholdDb: Number($('silenceThreshold').value), minimumDuration: Number($('silenceDuration').value) }); if (!result.analysis.intervals.length) throw new Error('No silence matched these settings.'); return { buffer: result.buffer, selection: null, playhead: Math.min(state.playhead, Core.bufferDuration(result.buffer)) }; }));
-    $('undoBtn').addEventListener('click', () => { const snapshot = state.history.undo(currentSnapshot('Redo')); if (snapshot) restoreSnapshot(snapshot); updateHistoryButtons(); });
-    $('redoBtn').addEventListener('click', () => { const snapshot = state.history.redo(currentSnapshot('Undo')); if (snapshot) restoreSnapshot(snapshot); updateHistoryButtons(); });
+    $('undoBtn').addEventListener('click', () => { if (isBusy()) return showBusyMessage(); const snapshot = state.history.undo(currentSnapshot('Redo')); if (snapshot) restoreSnapshot(snapshot); updateHistoryButtons(); });
+    $('redoBtn').addEventListener('click', () => { if (isBusy()) return showBusyMessage(); const snapshot = state.history.redo(currentSnapshot('Undo')); if (snapshot) restoreSnapshot(snapshot); updateHistoryButtons(); });
   }
 
   function resetSection(section) {
@@ -675,9 +725,18 @@
     applyEffects(Object.assign({}, state.effects, update), 'custom', 'Custom');
   }
 
+  async function resetLastEffect() {
+    if (!state.lastEffectKeys.length) return showMessage('Adjust an effect before resetting it.', 'info', 2500);
+    const defaults = defaultEffects();
+    const update = {};
+    state.lastEffectKeys.forEach((key) => { update[key] = JSON.parse(JSON.stringify(defaults[key])); });
+    await applyEffects(Object.assign({}, state.effects, update), 'custom', 'Custom');
+    showMessage('The last adjusted effect was reset.', 'success', 2500);
+  }
+
   function resetAll() {
     if (!state.originalData) return;
-    engine.stop(); state.history.clear(); state.clipboard = null; state.selection = null; state.playhead = 0; state.zoom = 1;
+    engine.stop(); state.history.clear(); state.clipboard = null; state.selection = null; state.playhead = 0; state.zoom = 1; state.lastEffectKeys = [];
     state.workingData = Core.cloneBufferData(state.originalData); state.workingBuffer = dataToNative(state.workingData);
     engine.setWorkingBuffer(state.workingBuffer); applyEffects(defaultEffects(), 'normal', 'Normal', FACTORY_PRESETS.normal.colors);
     updateAfterBufferChange(); updateHistoryButtons(); updateSelectionUI(); showMessage('The original audio and all controls were restored.', 'success');
@@ -703,7 +762,7 @@
     } catch (error) { return showMessage(error.message, 'error'); }
     state.exporting = true; $('downloadBtn').disabled = true; setProcessing(true, 'Rendering effects...', 1);
     try {
-      const result = await ExportApi.exportAudio({ buffer: state.workingBuffer, effectState: state.effects, settings, onProgress: (progress, message) => setProcessing(true, message, Math.round(progress * 100)) });
+      const result = await ExportApi.exportAudio({ buffer: state.workingBuffer, effectState: normalizeEffects(state.effects), settings, onProgress: (progress, message) => setProcessing(true, message, Math.round(progress * 100)) });
       const filename = Core.buildExportFilename($('exportFilename').value, result.extension);
       $('exportFilename').value = filename;
       triggerDownload(result.blob, filename);
@@ -748,6 +807,10 @@
     $('stopBtn').addEventListener('click', () => { engine.stop(); setPlayIcon(false); updateProgress(0); });
     $('backBtn').addEventListener('click', () => seekTo(state.playhead - 10)); $('forwardBtn').addEventListener('click', () => seekTo(state.playhead + 10));
     $('progressBar').addEventListener('click', (event) => { const rect = $('progressBar').getBoundingClientRect(); seekTo((event.clientX - rect.left) / rect.width * playbackDuration()); });
+    $('progressBar').addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); seekTo(state.playhead + (event.key === 'ArrowLeft' ? -5 : 5)); }
+      else if (event.key === 'Home' || event.key === 'End') { event.preventDefault(); seekTo(event.key === 'Home' ? 0 : playbackDuration()); }
+    });
     $('compareOriginalBtn').addEventListener('click', () => compare('original')); $('compareModifiedBtn').addEventListener('click', () => compare('modified'));
   }
 
@@ -761,9 +824,9 @@
     bindSwitch('eightDToggle', 'eightD', { control: 'eightDSpeed', section: 'basic', rebuild: true });
     bindSwitch('highPassToggle', 'highPassEnabled', { section: 'advanced' }); bindSwitch('lowPassToggle', 'lowPassEnabled', { section: 'advanced' });
     bindSwitch('compressorToggle', 'compressorEnabled', { section: 'advanced' }); bindSwitch('limiterToggle', 'limiterEnabled', { section: 'advanced' });
-    $('resetEqBtn').addEventListener('click', () => { state.effects.advancedEq = JSON.parse(JSON.stringify(DEFAULT_ADVANCED_EQ)); renderAdvancedEq(); markCustom('advanced'); engine.rebuildGraph().catch((error) => showMessage(error.message, 'error')); });
+    $('resetEqBtn').addEventListener('click', () => { if (isBusy()) return showBusyMessage(); state.effects.advancedEq = JSON.parse(JSON.stringify(DEFAULT_ADVANCED_EQ)); renderAdvancedEq(); markCustom('advanced', []); engine.rebuildGraph().catch((error) => showMessage(error.message, 'error')); });
     $('resetBasicBtn').addEventListener('click', () => resetSection('basic')); $('resetAdvancedBtn').addEventListener('click', () => resetSection('advanced'));
-    $('resetEffectBtn').addEventListener('click', () => resetSection(state.lastSection)); $('resetBtn').addEventListener('click', resetAll);
+    $('resetEffectBtn').addEventListener('click', resetLastEffect); $('resetBtn').addEventListener('click', resetAll);
     $('silenceThreshold').addEventListener('input', () => { $('silenceThresholdValue').textContent = `${$('silenceThreshold').value} dB`; updateRangeFill($('silenceThreshold')); scheduleSilenceAnalysis(); });
     $('silenceDuration').addEventListener('input', () => { $('silenceDurationValue').textContent = `${Number($('silenceDuration').value).toFixed(2)} s`; updateRangeFill($('silenceDuration')); scheduleSilenceAnalysis(); });
   }

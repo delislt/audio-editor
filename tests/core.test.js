@@ -145,4 +145,5 @@ test('dB conversions and export settings validation stay finite', () => {
   assert.deepEqual(core.validateExportSettings({ format: 'fake' }), {
     format: 'wav', sampleRate: 44100, channels: 2, bitDepth: 16, bitrate: 192,
   });
+  assert.equal(core.validateExportSettings({ sampleRate: 96000 }).sampleRate, 44100);
 });

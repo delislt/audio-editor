@@ -390,7 +390,7 @@
 
   function validateExportSettings(settings) {
     const format = ['wav', 'mp3', 'flac', 'm4a'].includes(settings && settings.format) ? settings.format : 'wav';
-    const sampleRate = [44100, 48000, 88200, 96000].includes(Number(settings && settings.sampleRate))
+    const sampleRate = [44100, 48000].includes(Number(settings && settings.sampleRate))
       ? Number(settings.sampleRate) : 44100;
     const channels = Number(settings && settings.channels) === 1 ? 1 : 2;
     const bitDepth = [16, 24].includes(Number(settings && settings.bitDepth)) ? Number(settings.bitDepth) : 16;

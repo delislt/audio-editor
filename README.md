@@ -43,6 +43,7 @@ Player volume is monitor-only and is intentionally excluded from exports. Proces
 | Tone.js | 14.8.49 | MIT | Web Audio graph, granular time/pitch processing and offline rendering |
 | lamejs | 1.2.1 | LGPL-3.0 | Client-side MP3 encoding |
 | @wasm-audio-decoders/flac | 0.2.10 | MIT | Reliable FLAC import where native browser decoding is unavailable |
+| Lucide | 1.27.0 | ISC | Interface icons loaded from a version-pinned CDN URL |
 | Mediabunny | 1.53.0 | MPL-2.0 | FLAC and MP4 container output |
 | @mediabunny/flac-encoder | 1.53.0 | MPL-2.0 | Real libFLAC WebAssembly encoding |
 | @mediabunny/aac-encoder | 1.53.0 | MPL-2.0 | AAC-LC WebAssembly encoding for M4A output, including Safari fallback |
