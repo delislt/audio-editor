@@ -2354,3 +2354,153 @@ select option { color: #111827; background: #f8fafc; }
   .panel-content, .processing-spinner, .clip-indicator.active { animation: none !important; }
   * { scroll-behavior: auto !important; }
 }
+
+/* Focused editor mode, clipping protection and preset layout fixes */
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.hero h1 {
+  line-height: .96;
+  padding-bottom: .16em;
+}
+.hero h1 span {
+  padding-block: .04em .18em;
+}
+
+.editor-mode-toggle {
+  display: inline-flex;
+  padding: 4px;
+  border: 1px solid var(--surface-border);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+.editor-mode-toggle button {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: .7rem;
+  font-weight: 800;
+}
+.editor-mode-toggle button[aria-pressed="true"] {
+  color: white;
+  background: linear-gradient(135deg, var(--vibe-primary), var(--vibe-secondary));
+  box-shadow: 0 7px 22px color-mix(in srgb, var(--vibe-primary) 28%, transparent);
+}
+.editor-mode-toggle svg { width: 15px; height: 15px; }
+.editor-mode-toggle button:focus-visible { outline: 2px solid var(--vibe-secondary); outline-offset: 2px; }
+
+.preset-toolbar .section-header-rich {
+  align-items: center;
+  margin-bottom: 0;
+}
+.preset-toolbar .section-header-rich > div {
+  display: grid;
+  gap: 4px;
+}
+.preset-toolbar .section-header-rich strong {
+  line-height: 1;
+}
+.preset-toolbar-actions { align-items: stretch; }
+.preset-status {
+  min-width: 148px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 10px 38px 10px 13px;
+}
+.preset-status > span {
+  color: var(--text-faint);
+  font-size: .52rem;
+  font-weight: 800;
+  letter-spacing: .14em;
+  line-height: 1.1;
+}
+.preset-status > strong {
+  color: var(--vibe-secondary);
+  font-size: .82rem;
+  line-height: 1.2;
+}
+
+.auto-protect-btn {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid color-mix(in srgb, #86efac 38%, var(--surface-border));
+  border-radius: 11px;
+  color: #bbf7d0;
+  background: color-mix(in srgb, #22c55e 10%, var(--surface-2));
+  font-size: .68rem;
+  font-weight: 800;
+}
+.auto-protect-btn:hover { border-color: #86efac; transform: translateY(-1px); }
+.auto-protect-btn svg { width: 15px; height: 15px; }
+
+.simple-mode .studio-only-panel,
+.simple-mode .studio-only-control,
+.simple-mode .my-presets,
+.simple-mode .waveform-toolbar,
+.simple-mode .selection-strip,
+.simple-mode .compare-toggle,
+.simple-mode .file-metadata,
+.simple-mode .export-settings-grid {
+  display: none !important;
+}
+.simple-mode .file-summary { margin-bottom: 14px; }
+.simple-mode .file-summary .file-name { max-width: min(70vw, 680px); }
+.simple-mode .basic-editor-panel {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.simple-mode .basic-editor-panel > summary { display: none; }
+.simple-mode .basic-editor-panel .panel-content {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0;
+}
+.simple-mode .basic-editor-panel .control-field,
+.simple-mode .basic-editor-panel .reset-section-btn {
+  border: 1px solid var(--surface-border);
+  border-radius: 16px;
+  background: var(--surface-2);
+}
+.simple-mode .export-editor-panel { margin-top: 2px; }
+
+@media (max-width: 820px) {
+  .simple-mode .basic-editor-panel .panel-content { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 600px) {
+  .header-inner { align-items: flex-start; }
+  .header-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .editor-mode-toggle button { padding-inline: 9px; }
+  .preset-toolbar-actions { align-items: stretch; }
+  .preset-status { flex: 1; min-width: 0; }
+  .meter-row { align-items: center; justify-content: flex-start; }
+  .auto-protect-btn { width: 100%; justify-content: center; }
+  .simple-mode .basic-editor-panel .panel-content { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 430px) {
+  .editor-mode-toggle button span { display: none; }
+  .editor-mode-toggle button { width: 38px; justify-content: center; }
+  .preset-toolbar-actions { display: grid; grid-template-columns: 1fr auto; }
+}

@@ -14,6 +14,7 @@
 
   const $ = (id) => document.getElementById(id);
   const PRESET_STORAGE_KEY = 'audio-editor-presets-v1';
+  const UI_MODE_STORAGE_KEY = 'audio-editor-ui-mode-v1';
   const SUPPORTED_EXTENSION = /\.(mp3|wav|ogg|m4a|aac|flac)$/i;
   const DEFAULT_ADVANCED_EQ = [
     { id: 'eq-1', enabled: false, type: 'lowshelf', frequency: 100, gain: 0, q: 0.7 },
@@ -36,31 +37,39 @@
     };
   }
 
+  function presetEq(overrides) {
+    return DEFAULT_ADVANCED_EQ.map((band, index) => Object.assign({}, band, overrides[index] || {}));
+  }
+
+  function factoryPreset(meta, effects) {
+    return Object.assign(defaultEffects(), meta, effects || {});
+  }
+
   const FACTORY_PRESETS = {
-    normal:       { label: 'Normal', category: 'essential', icon: 'circle-dot', description: 'Clean reference', speed: 1, pitch: 0, volume: 100, bass: 0, treble: 0, pan: 0, reverb: 0, echo: 0, eightD: false, colors: ['#8b5cf6', '#22d3ee'] },
-    nightcore:    { label: 'Nightcore', category: 'extreme', icon: 'zap', description: 'Fast and bright', speed: 1.30, pitch: 3, volume: 100, bass: 1, treble: 6, pan: 0, reverb: 8, echo: 0, eightD: false, colors: ['#ff56c7', '#22d3ee'] },
-    deepbass:     { label: 'Deep Bass', category: 'character', icon: 'waves', description: 'Heavy low end', speed: 0.90, pitch: -3, volume: 110, bass: 15, treble: -5, pan: 0, reverb: 10, echo: 5, eightD: false, colors: ['#7c3aed', '#f43f5e'] },
-    '8daudio':    { label: '8D Orbit', category: 'space', icon: 'orbit', description: 'Moving panorama', speed: 1, pitch: 0, volume: 100, bass: 3, treble: 2, pan: 0, reverb: 24, echo: 15, eightD: true, colors: ['#06b6d4', '#8b5cf6'] },
-    concert:      { label: 'Concert Hall', category: 'space', icon: 'music', description: 'Wide live room', speed: 1, pitch: 0, volume: 103, bass: 7, treble: 4, pan: 0, reverb: 58, echo: 20, eightD: false, colors: ['#f59e0b', '#ec4899'] },
-    slowcore:     { label: 'Slowcore', category: 'character', icon: 'cloud-rain', description: 'Heavy and spacious', speed: 0.72, pitch: -2, volume: 100, bass: 5, treble: -2, pan: 0, reverb: 62, echo: 12, eightD: false, colors: ['#6366f1', '#94a3b8'] },
-    lofi:         { label: 'Lo-Fi', category: 'character', icon: 'coffee', description: 'Soft worn tape', speed: 0.92, pitch: -1, volume: 95, bass: 7, treble: -5, pan: -6, reverb: 25, echo: 8, eightD: false, colors: ['#f59e0b', '#84cc16'] },
-    vaporwave:    { label: 'Vaporwave', category: 'character', icon: 'sunset', description: 'Dreamy retro drift', speed: 0.80, pitch: -4, volume: 100, bass: 5, treble: 0, pan: 12, reverb: 48, echo: 18, eightD: false, colors: ['#ff56c7', '#22d3ee'] },
-    phonecall:    { label: 'Phone Call', category: 'essential', icon: 'radio', description: 'Narrow and crisp', speed: 1, pitch: 2, volume: 96, bass: 0, treble: 9, pan: 0, reverb: 3, echo: 0, eightD: false, highPassEnabled: true, highPassFrequency: 350, lowPassEnabled: true, lowPassFrequency: 3800, colors: ['#10b981', '#facc15'] },
-    underwater:   { label: 'Underwater', category: 'space', icon: 'droplets', description: 'Deep liquid haze', speed: 0.85, pitch: -5, volume: 100, bass: 10, treble: -9, pan: -8, reverb: 78, echo: 30, eightD: false, lowPassEnabled: true, lowPassFrequency: 2600, colors: ['#0284c7', '#22d3ee'] },
-    hyperpop:     { label: 'Hyperpop', category: 'extreme', icon: 'sparkles', description: 'Glossy and electric', speed: 1.15, pitch: 4, volume: 104, bass: 4, treble: 10, pan: 0, reverb: 16, echo: 0, eightD: false, colors: ['#f43f5e', '#a855f7'] },
-    cinematic:    { label: 'Cinematic', category: 'space', icon: 'clapperboard', description: 'Large dramatic field', speed: 0.92, pitch: -2, volume: 105, bass: 11, treble: 3, pan: 0, reverb: 55, echo: 0, eightD: false, stereoWidth: 145, colors: ['#f97316', '#7c3aed'] },
-    dreamscape:   { label: 'Dreamscape', category: 'space', icon: 'moon-star', description: 'Soft endless air', speed: 0.82, pitch: -3, volume: 94, bass: 3, treble: 2, pan: 10, reverb: 74, echo: 0, eightD: false, stereoWidth: 135, colors: ['#818cf8', '#f0abfc'] },
-    cathedral:    { label: 'Cathedral', category: 'space', icon: 'landmark', description: 'Massive sacred room', speed: 1, pitch: 0, volume: 100, bass: 2, treble: 5, pan: 0, reverb: 92, echo: 0, eightD: false, colors: ['#fbbf24', '#a78bfa'] },
-    subterranean: { label: 'Subterranean', category: 'extreme', icon: 'chevrons-down', description: 'Dark seismic weight', speed: 0.68, pitch: -7, volume: 112, bass: 20, treble: -10, pan: 0, reverb: 18, echo: 0, eightD: false, colors: ['#ef4444', '#581c87'] },
-    crystal:      { label: 'Crystal', category: 'character', icon: 'gem', description: 'Bright detail', speed: 1.05, pitch: 5, volume: 96, bass: 0, treble: 13, pan: 6, reverb: 34, echo: 0, eightD: false, colors: ['#67e8f9', '#c4b5fd'] },
-    alienradio:   { label: 'Alien Radio', category: 'extreme', icon: 'satellite', description: 'Strange transmission', speed: 1.10, pitch: 7, volume: 98, bass: 1, treble: 11, pan: -18, reverb: 14, echo: 0, eightD: true, distortionDrive: 22, distortionMix: 18, colors: ['#84cc16', '#22d3ee'] },
-    tapewarmth:   { label: 'Tape Warmth', category: 'character', icon: 'cassette-tape', description: 'Rounded analog glow', speed: 0.96, pitch: -0.5, volume: 97, bass: 6, treble: -4, pan: -4, reverb: 12, echo: 0, eightD: false, distortionDrive: 9, distortionMix: 10, colors: ['#fb923c', '#eab308'] },
-    slowedreverb: { label: 'Slowed + Reverb', category: 'slowed', icon: 'cloud-moon', description: '0.85x, balanced space', speed: 0.85, pitch: 0, volume: 100, bass: 0, treble: 0, pan: 0, reverb: 50, echo: 0, eightD: false, colors: ['#8b5cf6', '#38bdf8'] },
-    softslowed:   { label: 'Soft Slowed', category: 'slowed', icon: 'feather', description: '0.92x, light reverb', speed: 0.92, pitch: 0, volume: 100, bass: 0, treble: 0, pan: 0, reverb: 30, echo: 0, eightD: false, colors: ['#a78bfa', '#67e8f9'] },
-    deepslowed:   { label: 'Deep Slowed', category: 'slowed', icon: 'moon', description: '0.75x, deep reverb', speed: 0.75, pitch: 0, volume: 100, bass: 0, treble: 0, pan: 0, reverb: 65, echo: 0, eightD: false, colors: ['#6366f1', '#0ea5e9'] },
-    ultraslowed:  { label: 'Ultra Slowed', category: 'slowed', icon: 'cloud-fog', description: '0.65x, huge reverb', speed: 0.65, pitch: 0, volume: 100, bass: 0, treble: 0, pan: 0, reverb: 82, echo: 0, eightD: false, colors: ['#4f46e5', '#7dd3fc'] },
-    vocalboost:   { label: 'Vocal Boost', category: 'voice', icon: 'mic-2', description: 'Clear vocal presence', vocalBoost: 72, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 2.5, bass: -1, mid: 2, treble: 2, colors: ['#ec4899', '#22d3ee'] },
-    podcast:      { label: 'Podcast', category: 'voice', icon: 'podcast', description: 'Controlled spoken voice', vocalBoost: 58, compressorEnabled: true, compressorThreshold: -22, compressorRatio: 3.5, limiterEnabled: true, limiterThreshold: -1, highPassEnabled: true, highPassFrequency: 75, bass: -2, mid: 2, treble: 1.5, gainDb: 1.5, colors: ['#14b8a6', '#8b5cf6'] },
+    normal: factoryPreset({ label: 'Normal', category: 'essential', icon: 'circle-dot', description: 'Clean reference', colors: ['#8b5cf6', '#22d3ee'] }),
+    nightcore: factoryPreset({ label: 'Nightcore', category: 'extreme', icon: 'zap', description: 'Fast, bright and controlled', colors: ['#ff56c7', '#22d3ee'] }, { speed: 1.3, pitch: 3, fineTune: 12, gainDb: -4, bass: 1, mid: -1, treble: 5, reverb: 8, stereoWidth: 118, compressorEnabled: true, compressorThreshold: -16, compressorRatio: 2.5, advancedEq: presetEq([{ enabled: true, gain: -1.5 }, {}, {}, { enabled: true, gain: 2.5 }, { enabled: true, gain: 2 }]) }),
+    deepbass: factoryPreset({ label: 'Deep Bass', category: 'character', icon: 'waves', description: 'Tight sub and solid punch', colors: ['#7c3aed', '#f43f5e'] }, { speed: 0.9, pitch: -3, gainDb: -7, bass: 12, mid: -2, treble: -3, reverb: 9, echo: 4, compressorEnabled: true, compressorThreshold: -18, compressorRatio: 3.5, advancedEq: presetEq([{ enabled: true, frequency: 85, gain: 5 }, { enabled: true, frequency: 240, gain: -2 }, {}, {}, { enabled: true, gain: -1.5 }]) }),
+    '8daudio': factoryPreset({ label: '8D Orbit', category: 'space', icon: 'orbit', description: 'Wide moving panorama', colors: ['#06b6d4', '#8b5cf6'] }, { gainDb: -4, bass: 2, treble: 2, reverb: 24, echo: 14, eightD: true, eightDSpeed: 2.4, stereoWidth: 155, highPassEnabled: true, highPassFrequency: 40, advancedEq: presetEq([{ enabled: true, gain: -1 }, {}, {}, { enabled: true, gain: 1.5 }, {}]) }),
+    concert: factoryPreset({ label: 'Concert Hall', category: 'space', icon: 'music', description: 'Natural hall with presence', colors: ['#f59e0b', '#ec4899'] }, { gainDb: -6, bass: 4, mid: 1, treble: 3, reverb: 58, echo: 16, stereoWidth: 160, compressorEnabled: true, compressorThreshold: -18, compressorRatio: 2, advancedEq: presetEq([{ enabled: true, gain: 2 }, {}, { enabled: true, gain: -1 }, { enabled: true, gain: 2 }, {}]) }),
+    slowcore: factoryPreset({ label: 'Slowcore', category: 'character', icon: 'cloud-rain', description: 'Heavy, dark and spacious', colors: ['#6366f1', '#94a3b8'] }, { speed: 0.72, pitch: -2, fineTune: -10, gainDb: -5, bass: 5, mid: -2, treble: -3, reverb: 62, echo: 10, stereoWidth: 138, lowPassEnabled: true, lowPassFrequency: 14500, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 2.5 }),
+    lofi: factoryPreset({ label: 'Lo-Fi', category: 'character', icon: 'coffee', description: 'Warm tape and soft highs', colors: ['#f59e0b', '#84cc16'] }, { speed: 0.92, pitch: -1, fineTune: -14, gainDb: -4, bass: 5, mid: -2, treble: -5, pan: -5, reverb: 22, echo: 7, stereoWidth: 88, distortionDrive: 14, distortionMix: 16, highPassEnabled: true, highPassFrequency: 55, lowPassEnabled: true, lowPassFrequency: 11500, compressorEnabled: true, compressorThreshold: -22, compressorRatio: 2.2, advancedEq: presetEq([{ enabled: true, gain: 2 }, { enabled: true, gain: -1.5 }, {}, {}, { enabled: true, gain: -3 }]) }),
+    vaporwave: factoryPreset({ label: 'Vaporwave', category: 'character', icon: 'sunset', description: 'Wide retro dream drift', colors: ['#ff56c7', '#22d3ee'] }, { speed: 0.8, pitch: -4, fineTune: -18, gainDb: -5, bass: 4, mid: -1, pan: 10, reverb: 48, echo: 18, stereoWidth: 155, lowPassEnabled: true, lowPassFrequency: 15500, compressorEnabled: true, compressorThreshold: -18, compressorRatio: 2.2, advancedEq: presetEq([{ enabled: true, gain: 2 }, {}, { enabled: true, gain: -1 }, {}, { enabled: true, gain: 1.5 }]) }),
+    phonecall: factoryPreset({ label: 'Phone Call', category: 'essential', icon: 'radio', description: 'Focused narrow-band voice', colors: ['#10b981', '#facc15'] }, { pitch: 1.5, gainDb: -3, mid: 4, treble: 3, vocalBoost: 34, stereoWidth: 35, distortionDrive: 8, distortionMix: 8, highPassEnabled: true, highPassFrequency: 320, lowPassEnabled: true, lowPassFrequency: 3900, compressorEnabled: true, compressorThreshold: -24, compressorRatio: 4, advancedEq: presetEq([{}, { enabled: true, frequency: 650, gain: 2 }, { enabled: true, frequency: 1400, gain: 3 }, { enabled: true, frequency: 2800, gain: 2 }, {}]) }),
+    underwater: factoryPreset({ label: 'Underwater', category: 'space', icon: 'droplets', description: 'Submerged low-pass haze', colors: ['#0284c7', '#22d3ee'] }, { speed: 0.85, pitch: -5, gainDb: -8, bass: 8, mid: -4, treble: -8, pan: -6, reverb: 72, echo: 24, stereoWidth: 132, lowPassEnabled: true, lowPassFrequency: 2600, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 3, advancedEq: presetEq([{ enabled: true, gain: 4 }, { enabled: true, gain: -2 }, {}, {}, { enabled: true, gain: -6 }]) }),
+    hyperpop: factoryPreset({ label: 'Hyperpop', category: 'extreme', icon: 'sparkles', description: 'Polished, loud and electric', colors: ['#f43f5e', '#a855f7'] }, { speed: 1.15, pitch: 4, fineTune: 16, gainDb: -7, bass: 3, mid: 2, treble: 7, reverb: 14, stereoWidth: 132, distortionDrive: 13, distortionMix: 11, compressorEnabled: true, compressorThreshold: -18, compressorRatio: 5, advancedEq: presetEq([{ enabled: true, gain: 1.5 }, {}, { enabled: true, gain: 1 }, { enabled: true, gain: 3 }, { enabled: true, gain: 2.5 }]) }),
+    cinematic: factoryPreset({ label: 'Cinematic', category: 'space', icon: 'clapperboard', description: 'Large dramatic soundstage', colors: ['#f97316', '#7c3aed'] }, { speed: 0.92, pitch: -2, gainDb: -7, bass: 8, mid: -1, treble: 2, reverb: 54, stereoWidth: 165, compressorEnabled: true, compressorThreshold: -16, compressorRatio: 3, advancedEq: presetEq([{ enabled: true, gain: 3 }, { enabled: true, gain: -1 }, {}, { enabled: true, gain: 2 }, { enabled: true, gain: 1 }]) }),
+    dreamscape: factoryPreset({ label: 'Dreamscape', category: 'space', icon: 'moon-star', description: 'Airy, soft and extra wide', colors: ['#818cf8', '#f0abfc'] }, { speed: 0.82, pitch: -3, fineTune: -8, gainDb: -6, bass: 2, treble: 2, pan: 8, reverb: 74, echo: 8, stereoWidth: 178, highPassEnabled: true, highPassFrequency: 45, advancedEq: presetEq([{ enabled: true, gain: -1 }, {}, { enabled: true, gain: -1 }, { enabled: true, gain: 2 }, { enabled: true, gain: 2.5 }]) }),
+    cathedral: factoryPreset({ label: 'Cathedral', category: 'space', icon: 'landmark', description: 'Huge clean sacred space', colors: ['#fbbf24', '#a78bfa'] }, { gainDb: -8, bass: 1, mid: 1, treble: 4, reverb: 90, stereoWidth: 175, highPassEnabled: true, highPassFrequency: 65, compressorEnabled: true, compressorThreshold: -17, compressorRatio: 2, advancedEq: presetEq([{ enabled: true, gain: -1 }, {}, { enabled: true, gain: 1 }, { enabled: true, gain: 2 }, { enabled: true, gain: 2 }]) }),
+    subterranean: factoryPreset({ label: 'Subterranean', category: 'extreme', icon: 'chevrons-down', description: 'Controlled seismic low end', colors: ['#ef4444', '#581c87'] }, { speed: 0.68, pitch: -7, gainDb: -10, bass: 14, mid: -5, treble: -9, reverb: 16, stereoWidth: 112, distortionDrive: 18, distortionMix: 14, lowPassEnabled: true, lowPassFrequency: 10500, compressorEnabled: true, compressorThreshold: -22, compressorRatio: 5, advancedEq: presetEq([{ enabled: true, gain: 6 }, { enabled: true, gain: -3 }, {}, {}, { enabled: true, gain: -4 }]) }),
+    crystal: factoryPreset({ label: 'Crystal', category: 'character', icon: 'gem', description: 'Detailed highs without harshness', colors: ['#67e8f9', '#c4b5fd'] }, { speed: 1.05, pitch: 5, fineTune: 14, gainDb: -6, bass: -2, mid: 1, treble: 8, pan: 5, reverb: 32, stereoWidth: 145, compressorEnabled: true, compressorThreshold: -15, compressorRatio: 2.4, advancedEq: presetEq([{ enabled: true, gain: -2 }, {}, { enabled: true, gain: 1 }, { enabled: true, gain: 3 }, { enabled: true, gain: 3 }]) }),
+    alienradio: factoryPreset({ label: 'Alien Radio', category: 'extreme', icon: 'satellite', description: 'Animated sci-fi transmission', colors: ['#84cc16', '#22d3ee'] }, { speed: 1.1, pitch: 7, fineTune: 36, gainDb: -8, mid: 3, treble: 6, pan: -16, reverb: 14, eightD: true, eightDSpeed: 3.6, stereoWidth: 158, distortionDrive: 28, distortionMix: 23, highPassEnabled: true, highPassFrequency: 220, lowPassEnabled: true, lowPassFrequency: 7400, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 4 }),
+    tapewarmth: factoryPreset({ label: 'Tape Warmth', category: 'character', icon: 'cassette-tape', description: 'Rounded analog saturation', colors: ['#fb923c', '#eab308'] }, { speed: 0.96, pitch: -0.5, fineTune: -8, gainDb: -3, bass: 4, mid: 1, treble: -3, pan: -3, reverb: 10, stereoWidth: 92, distortionDrive: 17, distortionMix: 19, lowPassEnabled: true, lowPassFrequency: 14500, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 2.4, advancedEq: presetEq([{ enabled: true, gain: 2 }, { enabled: true, gain: 1 }, {}, {}, { enabled: true, gain: -2 }]) }),
+    slowedreverb: factoryPreset({ label: 'Slowed + Reverb', category: 'slowed', icon: 'cloud-moon', description: 'Balanced slow spacious mix', colors: ['#8b5cf6', '#38bdf8'] }, { speed: 0.85, gainDb: -4, bass: 2, reverb: 50, stereoWidth: 142, compressorEnabled: true, compressorThreshold: -18, compressorRatio: 2.3, advancedEq: presetEq([{ enabled: true, gain: 1.5 }, {}, { enabled: true, gain: -1 }, {}, { enabled: true, gain: 1 }]) }),
+    softslowed: factoryPreset({ label: 'Soft Slowed', category: 'slowed', icon: 'feather', description: 'Gentle slow airy ambience', colors: ['#a78bfa', '#67e8f9'] }, { speed: 0.92, fineTune: -6, gainDb: -3, bass: 1, treble: 1, reverb: 30, stereoWidth: 128, highPassEnabled: true, highPassFrequency: 35, advancedEq: presetEq([{}, {}, {}, { enabled: true, gain: 1.5 }, { enabled: true, gain: 1 }]) }),
+    deepslowed: factoryPreset({ label: 'Deep Slowed', category: 'slowed', icon: 'moon', description: 'Deep slow cinematic weight', colors: ['#6366f1', '#0ea5e9'] }, { speed: 0.75, gainDb: -6, bass: 5, mid: -2, treble: -2, reverb: 64, stereoWidth: 152, lowPassEnabled: true, lowPassFrequency: 15500, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 3, advancedEq: presetEq([{ enabled: true, gain: 3 }, { enabled: true, gain: -1 }, {}, {}, { enabled: true, gain: -1 }]) }),
+    ultraslowed: factoryPreset({ label: 'Ultra Slowed', category: 'slowed', icon: 'cloud-fog', description: 'Massive slow enveloping space', colors: ['#4f46e5', '#7dd3fc'] }, { speed: 0.65, pitch: -1, gainDb: -8, bass: 6, mid: -3, treble: -3, reverb: 80, echo: 8, stereoWidth: 168, lowPassEnabled: true, lowPassFrequency: 12500, compressorEnabled: true, compressorThreshold: -22, compressorRatio: 3.5, advancedEq: presetEq([{ enabled: true, gain: 3 }, { enabled: true, gain: -2 }, {}, {}, { enabled: true, gain: -2 }]) }),
+    vocalboost: factoryPreset({ label: 'Vocal Boost', category: 'voice', icon: 'mic-2', description: 'Present vocals with clean dynamics', colors: ['#ec4899', '#22d3ee'] }, { gainDb: -3, bass: -2, mid: 2, treble: 2, vocalBoost: 72, stereoWidth: 105, highPassEnabled: true, highPassFrequency: 75, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 2.8, advancedEq: presetEq([{ enabled: true, gain: -2 }, { enabled: true, gain: -1 }, { enabled: true, frequency: 1600, gain: 2 }, { enabled: true, frequency: 4200, gain: 3 }, {}]) }),
+    podcast: factoryPreset({ label: 'Podcast', category: 'voice', icon: 'podcast', description: 'Clear consistent spoken voice', colors: ['#14b8a6', '#8b5cf6'] }, { gainDb: -2, bass: -3, mid: 2, treble: 1, vocalBoost: 60, stereoWidth: 90, highPassEnabled: true, highPassFrequency: 75, lowPassEnabled: true, lowPassFrequency: 16500, compressorEnabled: true, compressorThreshold: -23, compressorRatio: 3.8, advancedEq: presetEq([{ enabled: true, gain: -2 }, { enabled: true, frequency: 280, gain: -2 }, { enabled: true, frequency: 1500, gain: 2 }, { enabled: true, frequency: 3800, gain: 2 }, {}]) }),
   };
 
   const state = {
@@ -69,7 +78,7 @@
     effects: defaultEffects(), history: new Core.AudioHistory({ maxEntries: 12, maxBytes: 256 * 1024 * 1024 }),
     file: null, activePreset: 'normal', userPresets: [], lastEffectKeys: [], draggingSelection: false,
     pointerStartX: 0, pointerStartTime: 0, animationFrame: 0, transportRestartTimer: 0,
-    lastSection: 'basic', loading: false, exporting: false,
+    lastSection: 'basic', loading: false, exporting: false, editorMode: 'studio',
   };
 
   let engine;
@@ -118,6 +127,15 @@
 
   function nativeToData(buffer) {
     return { sampleRate: buffer.sampleRate, channels: Array.from({ length: buffer.numberOfChannels }, (_, index) => new Float32Array(buffer.getChannelData(index))) };
+  }
+
+  function nativeBufferPeak(buffer) {
+    let peak = 0;
+    for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+      const data = buffer.getChannelData(channel);
+      for (let index = 0; index < data.length; index++) peak = Math.max(peak, Math.abs(data[index]));
+    }
+    return peak;
   }
 
   function dataToNative(data) {
@@ -524,8 +542,8 @@
     renderAdvancedEq();
   }
 
-  async function applyEffects(nextEffects, presetKey, label, colors) {
-    if (isBusy()) return showBusyMessage();
+  async function applyEffects(nextEffects, presetKey, label, colors, options) {
+    if (isBusy() && !(options && options.allowWhileProcessing)) return showBusyMessage();
     const wasPlaying = engine.playing;
     const position = wasPlaying ? engine.currentOffset() : state.playhead;
     engine.stop(false);
@@ -742,6 +760,51 @@
     updateAfterBufferChange(); updateHistoryButtons(); updateSelectionUI(); showMessage('The original audio and all controls were restored.', 'success');
   }
 
+  function setEditorMode(mode, persist) {
+    state.editorMode = mode === 'simple' ? 'simple' : 'studio';
+    document.body.classList.toggle('simple-mode', state.editorMode === 'simple');
+    $('simpleModeBtn').setAttribute('aria-pressed', String(state.editorMode === 'simple'));
+    $('studioModeBtn').setAttribute('aria-pressed', String(state.editorMode === 'studio'));
+    if (persist) {
+      try { localStorage.setItem(UI_MODE_STORAGE_KEY, state.editorMode); } catch (error) {}
+      showMessage(state.editorMode === 'simple' ? 'Simple mode shows the focused controls from the classic editor.' : 'Studio mode shows the complete editor.', 'success', 2800);
+    }
+  }
+
+  async function autoProtectFromClipping() {
+    if (!state.workingBuffer) return showMessage('Load an audio file before running auto protection.', 'error');
+    if (isBusy()) return showBusyMessage();
+    const analysisEffects = normalizeEffects(state.effects);
+    analysisEffects.limiterEnabled = false;
+    const sampleRate = state.workingBuffer.sampleRate === 48000 ? 48000 : 44100;
+    const channels = state.workingBuffer.numberOfChannels === 1 ? 1 : 2;
+    let successMessage = '';
+    setProcessing(true, 'Analyzing full-track peak...', 2);
+    try {
+      const rendered = await ExportApi.renderProcessedAudio(state.workingBuffer, analysisEffects, { sampleRate, channels }, (progress) => {
+        setProcessing(true, 'Analyzing full-track peak...', Math.min(95, Math.round(progress / 0.55 * 95)));
+      });
+      const peakDb = Core.gainToDb(nativeBufferPeak(rendered));
+      const previousGain = Number(state.effects.gainDb) || 0;
+      const nextEffects = normalizeEffects(state.effects);
+      nextEffects.gainDb = Core.protectiveGainDb(previousGain, peakDb, -1);
+      nextEffects.limiterEnabled = true;
+      nextEffects.limiterThreshold = -1;
+      await applyEffects(nextEffects, 'custom', 'Auto Protected', null, { allowWhileProcessing: true });
+      state.lastEffectKeys = ['gainDb', 'limiterEnabled', 'limiterThreshold'];
+      updateResetEffectButton();
+      const reduction = previousGain - nextEffects.gainDb;
+      successMessage = reduction > 0.05
+        ? `Auto protection reduced Processing Gain by ${reduction.toFixed(1)} dB and enabled the -1 dB limiter.`
+        : 'Auto protection enabled the -1 dB limiter; no gain reduction was needed.';
+    } catch (error) {
+      showMessage(`Auto protection failed: ${error.message || 'Unable to analyze this track.'}`, 'error', 0);
+    } finally {
+      setProcessing(false);
+    }
+    if (successMessage) showMessage(successMessage, 'success', 6000);
+  }
+
   function updateExportUI() {
     const format = document.querySelector('input[name="exportFormat"]:checked').value;
     $('bitDepthField').hidden = format !== 'wav';
@@ -820,6 +883,11 @@
     $('savePresetBtn').addEventListener('click', () => { try { const record = Core.createPresetRecord($('presetNameInput').value, state.effects); state.userPresets.push(record); saveUserPresets(); renderUserPresets(); $('presetNameInput').value = ''; if (window.lucide) window.lucide.createIcons(); showMessage(`${record.name} saved on this device.`, 'success'); } catch (error) { showMessage(error.message, 'error'); } });
   }
 
+  function bindEditorMode() {
+    $('simpleModeBtn').addEventListener('click', () => setEditorMode('simple', true));
+    $('studioModeBtn').addEventListener('click', () => setEditorMode('studio', true));
+  }
+
   function bindAdvanced() {
     bindSwitch('eightDToggle', 'eightD', { control: 'eightDSpeed', section: 'basic', rebuild: true });
     bindSwitch('highPassToggle', 'highPassEnabled', { section: 'advanced' }); bindSwitch('lowPassToggle', 'lowPassEnabled', { section: 'advanced' });
@@ -853,11 +921,12 @@
     engine = new EngineApi.AudioEngine({ onMeter: (meter) => { $('peakValue').textContent = `${meter.peakDb.toFixed(1)} dB`; $('rmsValue').textContent = `${meter.rmsDb.toFixed(1)} dB`; $('clipIndicator').textContent = meter.clipping ? 'CLIPPING DETECTED' : 'Clipping: No'; $('clipIndicator').classList.toggle('active', meter.clipping); } });
     engine.setEffectState(state.effects);
     try { state.userPresets = Core.parsePresetCollection(localStorage.getItem(PRESET_STORAGE_KEY)); } catch (error) { state.userPresets = []; }
+    try { setEditorMode(localStorage.getItem(UI_MODE_STORAGE_KEY), false); } catch (error) { setEditorMode('studio', false); }
     renderFactoryPresets(); renderUserPresets(); renderAdvancedEq(); syncEffectsToUI();
-    bindUpload(); bindPlayer(); bindWaveform(); bindEditing(); bindEffectControls(); bindAdvanced(); bindPresets(); bindKeyboard();
+    bindUpload(); bindPlayer(); bindWaveform(); bindEditing(); bindEffectControls(); bindAdvanced(); bindPresets(); bindEditorMode(); bindKeyboard();
     document.querySelectorAll('input[type="range"]').forEach(updateRangeFill);
     document.querySelectorAll('input[name="exportFormat"]').forEach((input) => input.addEventListener('change', updateExportUI));
-    $('downloadBtn').addEventListener('click', exportCurrentAudio); updateExportUI(); updateSelectionUI(); updateHistoryButtons();
+    $('downloadBtn').addEventListener('click', exportCurrentAudio); $('autoProtectBtn').addEventListener('click', autoProtectFromClipping); updateExportUI(); updateSelectionUI(); updateHistoryButtons();
     const prime = () => engine.primeFromGesture(); document.addEventListener('pointerdown', prime, { passive: true }); document.addEventListener('touchend', prime, { passive: true }); document.addEventListener('keydown', prime);
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && engine.playing) engine.ensureRunning().catch(() => {}); });
     window.addEventListener('pagehide', () => { cancelAnimationFrame(state.animationFrame); if (engine) engine.stop(); });
