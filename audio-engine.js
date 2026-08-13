@@ -51,7 +51,10 @@
   function granularRequired(state, compareMode) {
     if (compareMode === 'original') return false;
     const granular = granularPlaybackOptions(state);
-    return Math.abs(granular.playbackRate - 1) > 0.0001 || Math.abs(granular.detune) > 0.01;
+    // A regular Player is the cleanest possible slowed source. It naturally
+    // lowers pitch together with tempo and never layers grains. Granular
+    // playback is only necessary when pitch must move independently.
+    return Math.abs(granular.detune) > 0.01;
   }
 
   function transportNeedsRestart(sourceKind, playing, state, compareMode) {
@@ -409,14 +412,23 @@
     }
 
     setEffectState(state) {
+      const wasPlaying = this.playing;
+      const offsetBeforeChange = wasPlaying ? this.currentOffset() : this.startedOffset;
       this.effectState = state;
       updateGraphValues(this.graph, state);
-      if (this.sourceKind === 'grain' && this.source) {
+      if (this.source) {
         const granular = granularPlaybackOptions(state);
         this.source.playbackRate = granular.playbackRate;
-        this.source.detune = granular.detune;
-        this.source.grainSize = granular.grainSize;
-        this.source.overlap = granular.overlap;
+        if (this.sourceKind === 'grain') {
+          this.source.detune = granular.detune;
+          this.source.grainSize = granular.grainSize;
+          this.source.overlap = granular.overlap;
+        }
+        if (wasPlaying && Math.abs(this.speedAtStart - granular.playbackRate) > 0.0001) {
+          this.startedOffset = offsetBeforeChange;
+          this.startedAt = getTone().now();
+          this.speedAtStart = granular.playbackRate;
+        }
       }
       if (this.monitorGain) this.monitorGain.gain.value = clamp(state.volume, 0, 150) / 100;
     }
@@ -488,6 +500,7 @@
         this.sourceKind = 'grain';
       } else {
         this.source = new Tone.Player(buffer);
+        this.source.playbackRate = this.sourceSpeed();
         this.sourceKind = 'dry';
       }
       this.source.connect(this.compareMode === 'original' ? this.graph.bypassInput : this.graph.input);

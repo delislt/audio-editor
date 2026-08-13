@@ -96,3 +96,13 @@ test('polished workspace navigation and tempo shortcuts remain connected', () =>
   assert.match(styles, /@supports selector\(details::details-content\)/);
   assert.match(styles, /\.tempo-shortcuts button\.active/);
 });
+
+test('slowed presets use one continuous source without pitch grains or echo', () => {
+  ['slowedreverb', 'softslowed', 'deepslowed', 'ultraslowed'].forEach((key) => {
+    const preset = script.match(new RegExp(`^    ${key}: (.*)$`, 'm'));
+    assert.ok(preset, `${key} preset is missing`);
+    assert.doesNotMatch(preset[1], /\bpitch\s*:/);
+    assert.doesNotMatch(preset[1], /\bfineTune\s*:/);
+    assert.match(preset[1], /\becho:\s*0\b/);
+  });
+});

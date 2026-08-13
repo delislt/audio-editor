@@ -34,13 +34,13 @@
     const channels = Number(exportSettings.channels) === 1 ? 1 : 2;
     const sampleRate = Number(exportSettings.sampleRate) === 48000 ? 48000 : 44100;
     const duration = Math.max(0.02, buffer.duration / speed + effectTailSeconds(state));
-    const pitchCents = clamp(state.pitch, -12, 12) * 100 + clamp(state.fineTune, -100, 100);
     report(onProgress, 0.03, 'Rendering effects...');
     const rendered = await Tone.Offline(async () => {
       const graph = engineApi.createToneEffectGraph(state, { toDestination: true });
       let source;
-      if (Math.abs(speed - 1) < 0.0001 && Math.abs(pitchCents) < 0.01) {
+      if (!engineApi.granularRequired(state, 'modified')) {
         source = new Tone.Player(buffer);
+        source.playbackRate = speed;
       } else {
         source = new Tone.GrainPlayer({
           url: buffer,
