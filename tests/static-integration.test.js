@@ -113,5 +113,7 @@ test('pitch and export never construct layered grain players', () => {
   assert.doesNotMatch(audioEngine, /GrainPlayer|grainSize|overlap/);
   assert.doesNotMatch(exportEngine, /GrainPlayer|grainSize|overlap/);
   assert.match(audioEngine, /function playbackRateForState\(/);
+  assert.match(audioEngine, /new Tone\.PitchShift\(pitchShiftOptions\(state\)\)/);
+  assert.match(audioEngine, /graph\.pitchShift\.wet\.value = pitchOptions\.wet/);
   assert.match(exportEngine, /playbackRateForState\(state, 'modified'\)/);
 });

@@ -43,23 +43,31 @@ test('WAV encoder writes real 24-bit PCM payload size', async () => {
 
 test('effect tail and output metadata reflect the selected format', () => {
   assert.equal(Export.effectTailSeconds({ reverb: 0, echo: 0 }), 0);
+  assert.equal(Export.effectTailSeconds({ reverb: 0, echo: 0, pitch: 5, fineTune: 0 }), 0.12);
   assert.ok(Export.effectTailSeconds({ reverb: 50, echo: 0 }) >= 2);
   assert.equal(Export.extensionFor('m4a'), 'm4a');
   assert.equal(Export.mimeFor('flac'), 'audio/flac');
 });
 
-test('tape-style playback combines speed, pitch and fine tune into one rate', () => {
+test('playback rate follows speed without being changed by pitch or fine tune', () => {
   assert.equal(Engine.playbackRateForState({ speed: 1, pitch: 0, fineTune: 0 }, 'modified'), 1);
   assert.equal(Engine.playbackRateForState({ speed: 0.75, pitch: 0, fineTune: 0 }, 'modified'), 0.75);
-  assert.equal(Engine.playbackRateForState({ speed: 1, pitch: 12, fineTune: 0 }, 'modified'), 2);
-  assert.equal(Engine.playbackRateForState({ speed: 1, pitch: -12, fineTune: 0 }, 'modified'), 0.5);
-  assert.ok(Engine.playbackRateForState({ speed: 1, pitch: 0, fineTune: 50 }, 'modified') > 1);
+  assert.equal(Engine.playbackRateForState({ speed: 1, pitch: 12, fineTune: 0 }, 'modified'), 1);
+  assert.equal(Engine.playbackRateForState({ speed: 0.75, pitch: -12, fineTune: -100 }, 'modified'), 0.75);
   assert.equal(Engine.playbackRateForState({ speed: 0.5, pitch: -12, fineTune: -100 }, 'original'), 1);
 });
 
-test('tape-style playback clamps unsafe control values before calculating its rate', () => {
-  const expected = 2 * Math.pow(2, 13 / 12);
-  assert.equal(Engine.playbackRateForState({ speed: 9, pitch: 40, fineTune: 500 }, 'modified'), expected);
+test('dedicated pitch options are fully wet without feedback or extra delay', () => {
+  assert.deepEqual(Engine.pitchShiftOptions({ pitch: 0, fineTune: 0 }), {
+    pitch: 0, windowSize: 0.04, delayTime: 0, feedback: 0, wet: 0,
+  });
+  assert.deepEqual(Engine.pitchShiftOptions({ pitch: 12, fineTune: 0 }), {
+    pitch: 12, windowSize: 0.08, delayTime: 0, feedback: 0, wet: 1,
+  });
+  const clamped = Engine.pitchShiftOptions({ pitch: 40, fineTune: 500 });
+  assert.equal(clamped.pitch, 13);
+  assert.equal(clamped.wet, 1);
+  assert.ok(clamped.windowSize >= 0.04 && clamped.windowSize <= 0.08);
 });
 
 test('pitch-shifted playback creates exactly one regular player source', () => {
@@ -80,8 +88,44 @@ test('pitch-shifted playback creates exactly one regular player source', () => {
     engine.createSource();
     assert.equal(created.players, 1);
     assert.equal(engine.sourceKind, 'single');
-    assert.equal(engine.source.playbackRate, 1.5);
+    assert.equal(engine.source.playbackRate, 0.75);
   } finally {
     globalThis.Tone = previousTone;
+  }
+});
+
+test('pitch-shifted export keeps the selected tempo and creates one source', async () => {
+  const previousTone = globalThis.Tone;
+  const previousEngine = globalThis.AudioEditorEngine;
+  const observed = { players: 0 };
+  class FakePlayer {
+    constructor(buffer) { this.buffer = buffer; this.playbackRate = 1; observed.players += 1; }
+    set playbackRate(value) { this._playbackRate = value; observed.playbackRate = value; }
+    get playbackRate() { return this._playbackRate; }
+    connect(target) { this.target = target; }
+    start(time, offset) { observed.start = [time, offset]; }
+  }
+  globalThis.Tone = {
+    Player: FakePlayer,
+    async Offline(callback, duration, channels, sampleRate) {
+      observed.offline = { duration, channels, sampleRate };
+      await callback();
+      return { get() { return { length: 4 }; } };
+    },
+  };
+  globalThis.AudioEditorEngine = {
+    playbackRateForState: Engine.playbackRateForState,
+    createToneEffectGraph() { return { input: {} }; },
+  };
+  try {
+    const buffer = { numberOfChannels: 2, length: 441000, duration: 10 };
+    await Export.renderProcessedAudio(buffer, { speed: 0.75, pitch: 12, fineTune: 0, reverb: 0, echo: 0 }, { channels: 2, sampleRate: 44100 });
+    assert.equal(observed.players, 1);
+    assert.equal(observed.playbackRate, 0.75);
+    assert.equal(observed.offline.duration, 10 / 0.75 + 0.12);
+    assert.deepEqual(observed.start, [0, 0]);
+  } finally {
+    globalThis.Tone = previousTone;
+    globalThis.AudioEditorEngine = previousEngine;
   }
 });

@@ -22,7 +22,11 @@
   function effectTailSeconds(state) {
     const reverbTail = clamp(state.reverb, 0, 100) > 0 ? 2.05 : 0;
     const echoTail = clamp(state.echo, 0, 100) > 0 ? 1.8 : 0;
-    return Math.max(reverbTail, echoTail);
+    const pitchTail = Math.abs(
+      clamp(state.pitch == null ? 0 : state.pitch, -12, 12)
+      + clamp(state.fineTune == null ? 0 : state.fineTune, -100, 100) / 100,
+    ) > 0.0001 ? 0.12 : 0;
+    return Math.max(reverbTail, echoTail, pitchTail);
   }
 
   async function renderProcessedAudio(buffer, effectState, exportSettings, onProgress) {

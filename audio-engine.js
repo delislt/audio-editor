@@ -6,7 +6,7 @@
   'use strict';
 
   const DISPOSABLE_KEYS = [
-    'input', 'bypassInput', 'bass', 'mid', 'treble', 'advancedFilters', 'highPass', 'lowPass',
+    'input', 'bypassInput', 'pitchShift', 'bass', 'mid', 'treble', 'advancedFilters', 'highPass', 'lowPass',
     'vocalLow', 'vocalPresence', 'vocalCompressor', 'widthSplit', 'widthMidGain', 'widthSideGain',
     'widthMerge', 'pan', 'panLfo', 'distortion', 'delay', 'reverbDry', 'reverbConvolver',
     'reverbWet', 'reverbSum', 'processingGain', 'compressor', 'limiterDry', 'limiter',
@@ -30,9 +30,21 @@
   function playbackRateForState(state, compareMode) {
     if (compareMode === 'original') return 1;
     const effects = state || {};
-    const speed = clamp(effects.speed, 0.25, 2);
-    const semitones = clamp(effects.pitch, -12, 12) + clamp(effects.fineTune, -100, 100) / 100;
-    return speed * Math.pow(2, semitones / 12);
+    return clamp(effects.speed == null ? 1 : effects.speed, 0.25, 2);
+  }
+
+  function pitchShiftOptions(state) {
+    const effects = state || {};
+    const pitch = clamp(effects.pitch == null ? 0 : effects.pitch, -12, 12)
+      + clamp(effects.fineTune == null ? 0 : effects.fineTune, -100, 100) / 100;
+    const depth = Math.min(1, Math.abs(pitch) / 12);
+    return {
+      pitch,
+      windowSize: Number((0.04 + depth * 0.04).toFixed(3)),
+      delayTime: 0,
+      feedback: 0,
+      wet: Math.abs(pitch) > 0.0001 ? 1 : 0,
+    };
   }
 
   function isIOSDevice() {
@@ -112,11 +124,12 @@
     const graph = { advancedFilters: [] };
     graph.input = new Tone.Gain(1);
     graph.bypassInput = new Tone.Gain(1);
+    graph.pitchShift = new Tone.PitchShift(pitchShiftOptions(state));
 
     graph.bass = new Tone.Filter({ type: 'lowshelf', frequency: 200, gain: clamp(state.bass, -18, 24) });
     graph.mid = new Tone.Filter({ type: 'peaking', frequency: 1000, Q: 0.8, gain: clamp(state.mid, -18, 18) });
     graph.treble = new Tone.Filter({ type: 'highshelf', frequency: 3500, gain: clamp(state.treble, -18, 18) });
-    graph.input.chain(graph.bass, graph.mid, graph.treble);
+    graph.input.chain(graph.pitchShift, graph.bass, graph.mid, graph.treble);
     let previous = graph.treble;
 
     (Array.isArray(state.advancedEq) ? state.advancedEq : []).forEach((band) => {
@@ -248,6 +261,10 @@
 
   function updateGraphValues(graph, state) {
     if (!graph) return;
+    const pitchOptions = pitchShiftOptions(state);
+    graph.pitchShift.pitch = pitchOptions.pitch;
+    graph.pitchShift.windowSize = pitchOptions.windowSize;
+    graph.pitchShift.wet.value = pitchOptions.wet;
     graph.bass.gain.value = clamp(state.bass, -18, 24);
     graph.mid.gain.value = clamp(state.mid, -18, 18);
     graph.treble.gain.value = clamp(state.treble, -18, 18);
@@ -562,6 +579,7 @@
     createToneEffectGraph,
     disposeToneGraph,
     playbackRateForState,
+    pitchShiftOptions,
     isIOSDevice,
     mapFilterType,
     updateGraphValues,
