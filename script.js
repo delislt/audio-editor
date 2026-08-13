@@ -461,12 +461,13 @@
   }
 
   function scheduleTransportRestart() {
-    if (!engine.playing) { engine.setEffectState(state.effects); return; }
+    const requiresRestart = engine.updateTransportEffectState(state.effects);
     clearTimeout(state.transportRestartTimer);
+    if (!requiresRestart) return;
     state.transportRestartTimer = setTimeout(async () => {
+      if (!engine.playing) return;
       const position = engine.currentOffset();
       engine.pause();
-      engine.setEffectState(state.effects);
       try { await engine.play(position); playbackLoop(); } catch (error) { showMessage(error.message, 'error'); }
     }, 80);
   }
