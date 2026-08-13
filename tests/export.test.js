@@ -71,10 +71,42 @@ test('granular playback options clamp unsafe transport values', () => {
 
 test('transport restarts only when changing between dry and granular sources', () => {
   const slowed = { speed: 0.75, pitch: 0, fineTune: 0 };
+  const pitchShifted = { speed: 0.75, pitch: -1, fineTune: 0 };
   const neutral = { speed: 1, pitch: 0, fineTune: 0 };
-  assert.equal(Engine.transportNeedsRestart('dry', true, slowed, 'modified'), true);
-  assert.equal(Engine.transportNeedsRestart('grain', true, slowed, 'modified'), false);
+  assert.equal(Engine.granularRequired(slowed, 'modified'), false);
+  assert.equal(Engine.granularRequired(pitchShifted, 'modified'), true);
+  assert.equal(Engine.transportNeedsRestart('dry', true, slowed, 'modified'), false);
+  assert.equal(Engine.transportNeedsRestart('dry', true, pitchShifted, 'modified'), true);
+  assert.equal(Engine.transportNeedsRestart('grain', true, pitchShifted, 'modified'), false);
   assert.equal(Engine.transportNeedsRestart('grain', true, neutral, 'modified'), true);
   assert.equal(Engine.transportNeedsRestart('dry', false, slowed, 'modified'), false);
   assert.equal(Engine.transportNeedsRestart('dry', true, slowed, 'original'), false);
+});
+
+test('speed-only slowed playback creates exactly one regular player source', () => {
+  const previousTone = globalThis.Tone;
+  const created = { players: 0, grains: 0 };
+  class FakePlayer {
+    constructor(buffer) { this.buffer = buffer; this.playbackRate = 1; created.players += 1; }
+    connect(target) { this.target = target; }
+    disconnect() {}
+    dispose() {}
+  }
+  class FakeGrainPlayer extends FakePlayer {
+    constructor(options) { super(options.url); created.players -= 1; created.grains += 1; }
+  }
+  globalThis.Tone = { Player: FakePlayer, GrainPlayer: FakeGrainPlayer };
+  try {
+    const engine = new Engine.AudioEngine();
+    engine.graph = { input: {}, bypassInput: {} };
+    engine.workingBuffer = { duration: 10, sampleRate: 44100 };
+    engine.effectState = { speed: 0.75, pitch: 0, fineTune: 0 };
+    engine.createSource();
+    assert.equal(created.players, 1);
+    assert.equal(created.grains, 0);
+    assert.equal(engine.sourceKind, 'dry');
+    assert.equal(engine.source.playbackRate, 0.75);
+  } finally {
+    globalThis.Tone = previousTone;
+  }
 });
