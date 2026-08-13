@@ -52,7 +52,7 @@ Player volume is monitor-only and is intentionally excluded from exports. Proces
 
 Mediabunny and its codec extensions are version-pinned under `vendor/mediabunny-1.53.0/` so FLAC and M4A/AAC export does not depend on a runtime package CDN. The bundled MPL-2.0 license is included beside those files.
 
-Tone.js drives one continuous `Player` for speed and a fully wet `PitchShift` node for independent transposition. The dry and shifted signals are never mixed while pitch is active, and the player rate remains tied only to the Speed/Tempo control. Dedicated WebAssembly encoders are used only where browser APIs do not provide portable static-site encoding.
+Tone.js drives one continuous `Player` for speed and a fully wet `PitchShift` node for independent transposition. Pitch and Fine Tune use the full 100 ms analysis window for smoother transposition, the dry and shifted signals are never mixed while pitch is active, and the player rate remains tied only to the Speed/Tempo control. Dedicated WebAssembly encoders are used only where browser APIs do not provide portable static-site encoding.
 
 ## Development and verification
 

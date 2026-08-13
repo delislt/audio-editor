@@ -435,7 +435,7 @@
     ['reverbSlider', 'reverb', 'reverbValue', (v) => `${Math.round(v)}%`, 'basic'],
     ['echoSlider', 'echo', 'echoValue', (v) => `${Math.round(v)}%`, 'basic'],
     ['panSlider', 'pan', 'panValue', formatPan, 'basic'],
-    ['eightDSpeed', 'eightDSpeed', 'eightDSpeedValue', (v) => v.toFixed(1), 'basic'],
+    ['eightDSpeed', 'eightDSpeed', 'eightDSpeedValue', (v) => `${v.toFixed(1)}x · ${(4 / v).toFixed(1)} s/orbit`, 'basic'],
     ['vocalBoostSlider', 'vocalBoost', 'vocalBoostValue', (v) => `${Math.round(v)}%`, 'advanced'],
     ['stereoWidthSlider', 'stereoWidth', 'stereoWidthValue', (v) => `${Math.round(v)}%`, 'advanced'],
     ['distortionDriveSlider', 'distortionDrive', 'distortionDriveValue', (v) => `${Math.round(v)}%`, 'advanced'],
