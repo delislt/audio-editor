@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const Export = require('../export-engine.js');
+const Engine = require('../audio-engine.js');
 
 function fakeAudioBuffer(channels, sampleRate = 44100) {
   return {
@@ -45,4 +46,24 @@ test('effect tail and output metadata reflect the selected format', () => {
   assert.ok(Export.effectTailSeconds({ reverb: 50, echo: 0 }) >= 2);
   assert.equal(Export.extensionFor('m4a'), 'm4a');
   assert.equal(Export.mimeFor('flac'), 'audio/flac');
+});
+
+test('granular playback adapts its window for cleaner slowed audio', () => {
+  const neutral = Engine.granularPlaybackOptions({ speed: 1, pitch: 0, fineTune: 0 });
+  const slowed = Engine.granularPlaybackOptions({ speed: 0.7, pitch: -2, fineTune: 0 });
+  const deepSlowed = Engine.granularPlaybackOptions({ speed: 0.4, pitch: -5, fineTune: -20 });
+  assert.deepEqual(neutral, { playbackRate: 1, detune: 0, grainSize: 0.2, overlap: 0.1, loop: false });
+  assert.ok(slowed.grainSize > neutral.grainSize);
+  assert.ok(slowed.overlap > neutral.overlap);
+  assert.ok(deepSlowed.grainSize > slowed.grainSize);
+  assert.ok(deepSlowed.overlap > slowed.overlap);
+  assert.ok(deepSlowed.overlap < deepSlowed.grainSize);
+});
+
+test('granular playback options clamp unsafe transport values', () => {
+  const options = Engine.granularPlaybackOptions({ speed: 9, pitch: -40, fineTune: -500 });
+  assert.equal(options.playbackRate, 2);
+  assert.equal(options.detune, -1300);
+  assert.ok(options.grainSize >= 0.14 && options.grainSize <= 0.42);
+  assert.ok(options.overlap >= 0.07 && options.overlap <= 0.24);
 });

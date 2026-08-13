@@ -84,3 +84,15 @@ test('hero and preset summaries retain unclipped stacked layouts', () => {
 test('mobile layout clips decorative hero art instead of widening the page', () => {
   assert.match(styles, /@media \(max-width: 600px\) \{[\s\S]*?\.hero \{ overflow: hidden; \}/);
 });
+
+test('polished workspace navigation and tempo shortcuts remain connected', () => {
+  ['basicPanel', 'editPanel', 'advancedPanel', 'historyPanel', 'exportPanel']
+    .forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
+  assert.equal([...html.matchAll(/data-panel-target=/g)].length, 5);
+  assert.equal([...html.matchAll(/data-speed-value=/g)].length, 4);
+  assert.match(script, /function bindWorkspaceNavigation\(/);
+  assert.match(script, /function syncSpeedShortcuts\(/);
+  assert.match(styles, /\.workspace-nav \{/);
+  assert.match(styles, /@supports selector\(details::details-content\)/);
+  assert.match(styles, /\.tempo-shortcuts button\.active/);
+});

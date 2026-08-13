@@ -44,11 +44,7 @@
       } else {
         source = new Tone.GrainPlayer({
           url: buffer,
-          playbackRate: speed,
-          detune: pitchCents,
-          grainSize: 0.12,
-          overlap: 0.045,
-          loop: false,
+          ...engineApi.granularPlaybackOptions(state),
         });
       }
       source.connect(graph.input);

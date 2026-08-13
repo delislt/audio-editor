@@ -51,7 +51,7 @@
     deepbass: factoryPreset({ label: 'Deep Bass', category: 'character', icon: 'waves', description: 'Tight sub and solid punch', colors: ['#7c3aed', '#f43f5e'] }, { speed: 0.9, pitch: -3, gainDb: -7, bass: 12, mid: -2, treble: -3, reverb: 9, echo: 4, compressorEnabled: true, compressorThreshold: -18, compressorRatio: 3.5, advancedEq: presetEq([{ enabled: true, frequency: 85, gain: 5 }, { enabled: true, frequency: 240, gain: -2 }, {}, {}, { enabled: true, gain: -1.5 }]) }),
     '8daudio': factoryPreset({ label: '8D Orbit', category: 'space', icon: 'orbit', description: 'Wide moving panorama', colors: ['#06b6d4', '#8b5cf6'] }, { gainDb: -4, bass: 2, treble: 2, reverb: 24, echo: 14, eightD: true, eightDSpeed: 2.4, stereoWidth: 155, highPassEnabled: true, highPassFrequency: 40, advancedEq: presetEq([{ enabled: true, gain: -1 }, {}, {}, { enabled: true, gain: 1.5 }, {}]) }),
     concert: factoryPreset({ label: 'Concert Hall', category: 'space', icon: 'music', description: 'Natural hall with presence', colors: ['#f59e0b', '#ec4899'] }, { gainDb: -6, bass: 4, mid: 1, treble: 3, reverb: 58, echo: 16, stereoWidth: 160, compressorEnabled: true, compressorThreshold: -18, compressorRatio: 2, advancedEq: presetEq([{ enabled: true, gain: 2 }, {}, { enabled: true, gain: -1 }, { enabled: true, gain: 2 }, {}]) }),
-    slowcore: factoryPreset({ label: 'Slowcore', category: 'character', icon: 'cloud-rain', description: 'Heavy, dark and spacious', colors: ['#6366f1', '#94a3b8'] }, { speed: 0.72, pitch: -2, fineTune: -10, gainDb: -5, bass: 5, mid: -2, treble: -3, reverb: 62, echo: 10, stereoWidth: 138, lowPassEnabled: true, lowPassFrequency: 14500, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 2.5 }),
+    slowcore: factoryPreset({ label: 'Slowcore', category: 'character', icon: 'cloud-rain', description: 'Smooth, dark and spacious', colors: ['#6366f1', '#94a3b8'] }, { speed: 0.76, pitch: -1, fineTune: -8, gainDb: -5, bass: 4, mid: -1.5, treble: -2, reverb: 54, echo: 7, stereoWidth: 132, lowPassEnabled: true, lowPassFrequency: 15200, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 2.3 }),
     lofi: factoryPreset({ label: 'Lo-Fi', category: 'character', icon: 'coffee', description: 'Warm tape and soft highs', colors: ['#f59e0b', '#84cc16'] }, { speed: 0.92, pitch: -1, fineTune: -14, gainDb: -4, bass: 5, mid: -2, treble: -5, pan: -5, reverb: 22, echo: 7, stereoWidth: 88, distortionDrive: 14, distortionMix: 16, highPassEnabled: true, highPassFrequency: 55, lowPassEnabled: true, lowPassFrequency: 11500, compressorEnabled: true, compressorThreshold: -22, compressorRatio: 2.2, advancedEq: presetEq([{ enabled: true, gain: 2 }, { enabled: true, gain: -1.5 }, {}, {}, { enabled: true, gain: -3 }]) }),
     vaporwave: factoryPreset({ label: 'Vaporwave', category: 'character', icon: 'sunset', description: 'Wide retro dream drift', colors: ['#ff56c7', '#22d3ee'] }, { speed: 0.8, pitch: -4, fineTune: -18, gainDb: -5, bass: 4, mid: -1, pan: 10, reverb: 48, echo: 18, stereoWidth: 155, lowPassEnabled: true, lowPassFrequency: 15500, compressorEnabled: true, compressorThreshold: -18, compressorRatio: 2.2, advancedEq: presetEq([{ enabled: true, gain: 2 }, {}, { enabled: true, gain: -1 }, {}, { enabled: true, gain: 1.5 }]) }),
     phonecall: factoryPreset({ label: 'Phone Call', category: 'essential', icon: 'radio', description: 'Focused narrow-band voice', colors: ['#10b981', '#facc15'] }, { pitch: 1.5, gainDb: -3, mid: 4, treble: 3, vocalBoost: 34, stereoWidth: 35, distortionDrive: 8, distortionMix: 8, highPassEnabled: true, highPassFrequency: 320, lowPassEnabled: true, lowPassFrequency: 3900, compressorEnabled: true, compressorThreshold: -24, compressorRatio: 4, advancedEq: presetEq([{}, { enabled: true, frequency: 650, gain: 2 }, { enabled: true, frequency: 1400, gain: 3 }, { enabled: true, frequency: 2800, gain: 2 }, {}]) }),
@@ -64,10 +64,10 @@
     crystal: factoryPreset({ label: 'Crystal', category: 'character', icon: 'gem', description: 'Detailed highs without harshness', colors: ['#67e8f9', '#c4b5fd'] }, { speed: 1.05, pitch: 5, fineTune: 14, gainDb: -6, bass: -2, mid: 1, treble: 8, pan: 5, reverb: 32, stereoWidth: 145, compressorEnabled: true, compressorThreshold: -15, compressorRatio: 2.4, advancedEq: presetEq([{ enabled: true, gain: -2 }, {}, { enabled: true, gain: 1 }, { enabled: true, gain: 3 }, { enabled: true, gain: 3 }]) }),
     alienradio: factoryPreset({ label: 'Alien Radio', category: 'extreme', icon: 'satellite', description: 'Animated sci-fi transmission', colors: ['#84cc16', '#22d3ee'] }, { speed: 1.1, pitch: 7, fineTune: 36, gainDb: -8, mid: 3, treble: 6, pan: -16, reverb: 14, eightD: true, eightDSpeed: 3.6, stereoWidth: 158, distortionDrive: 28, distortionMix: 23, highPassEnabled: true, highPassFrequency: 220, lowPassEnabled: true, lowPassFrequency: 7400, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 4 }),
     tapewarmth: factoryPreset({ label: 'Tape Warmth', category: 'character', icon: 'cassette-tape', description: 'Rounded analog saturation', colors: ['#fb923c', '#eab308'] }, { speed: 0.96, pitch: -0.5, fineTune: -8, gainDb: -3, bass: 4, mid: 1, treble: -3, pan: -3, reverb: 10, stereoWidth: 92, distortionDrive: 17, distortionMix: 19, lowPassEnabled: true, lowPassFrequency: 14500, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 2.4, advancedEq: presetEq([{ enabled: true, gain: 2 }, { enabled: true, gain: 1 }, {}, {}, { enabled: true, gain: -2 }]) }),
-    slowedreverb: factoryPreset({ label: 'Slowed + Reverb', category: 'slowed', icon: 'cloud-moon', description: 'Balanced slow spacious mix', colors: ['#8b5cf6', '#38bdf8'] }, { speed: 0.85, gainDb: -4, bass: 2, reverb: 50, stereoWidth: 142, compressorEnabled: true, compressorThreshold: -18, compressorRatio: 2.3, advancedEq: presetEq([{ enabled: true, gain: 1.5 }, {}, { enabled: true, gain: -1 }, {}, { enabled: true, gain: 1 }]) }),
-    softslowed: factoryPreset({ label: 'Soft Slowed', category: 'slowed', icon: 'feather', description: 'Gentle slow airy ambience', colors: ['#a78bfa', '#67e8f9'] }, { speed: 0.92, fineTune: -6, gainDb: -3, bass: 1, treble: 1, reverb: 30, stereoWidth: 128, highPassEnabled: true, highPassFrequency: 35, advancedEq: presetEq([{}, {}, {}, { enabled: true, gain: 1.5 }, { enabled: true, gain: 1 }]) }),
-    deepslowed: factoryPreset({ label: 'Deep Slowed', category: 'slowed', icon: 'moon', description: 'Deep slow cinematic weight', colors: ['#6366f1', '#0ea5e9'] }, { speed: 0.75, gainDb: -6, bass: 5, mid: -2, treble: -2, reverb: 64, stereoWidth: 152, lowPassEnabled: true, lowPassFrequency: 15500, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 3, advancedEq: presetEq([{ enabled: true, gain: 3 }, { enabled: true, gain: -1 }, {}, {}, { enabled: true, gain: -1 }]) }),
-    ultraslowed: factoryPreset({ label: 'Ultra Slowed', category: 'slowed', icon: 'cloud-fog', description: 'Massive slow enveloping space', colors: ['#4f46e5', '#7dd3fc'] }, { speed: 0.65, pitch: -1, gainDb: -8, bass: 6, mid: -3, treble: -3, reverb: 80, echo: 8, stereoWidth: 168, lowPassEnabled: true, lowPassFrequency: 12500, compressorEnabled: true, compressorThreshold: -22, compressorRatio: 3.5, advancedEq: presetEq([{ enabled: true, gain: 3 }, { enabled: true, gain: -2 }, {}, {}, { enabled: true, gain: -2 }]) }),
+    slowedreverb: factoryPreset({ label: 'Slowed + Reverb', category: 'slowed', icon: 'cloud-moon', description: 'Natural slow spacious mix', colors: ['#8b5cf6', '#38bdf8'] }, { speed: 0.86, gainDb: -4, bass: 1.5, mid: -0.5, treble: 0.5, reverb: 43, echo: 3, stereoWidth: 134, compressorEnabled: true, compressorThreshold: -18, compressorRatio: 2.1, advancedEq: presetEq([{ enabled: true, gain: 1 }, {}, { enabled: true, gain: -0.5 }, {}, { enabled: true, gain: 0.5 }]) }),
+    softslowed: factoryPreset({ label: 'Soft Slowed', category: 'slowed', icon: 'feather', description: 'Clean gentle slow ambience', colors: ['#a78bfa', '#67e8f9'] }, { speed: 0.93, fineTune: -4, gainDb: -3, bass: 0.5, treble: 0.5, reverb: 24, stereoWidth: 120, highPassEnabled: true, highPassFrequency: 32, advancedEq: presetEq([{}, {}, {}, { enabled: true, gain: 1 }, { enabled: true, gain: 0.5 }]) }),
+    deepslowed: factoryPreset({ label: 'Deep Slowed', category: 'slowed', icon: 'moon', description: 'Smooth deep cinematic weight', colors: ['#6366f1', '#0ea5e9'] }, { speed: 0.78, pitch: -1, gainDb: -6, bass: 4, mid: -1.5, treble: -1.5, reverb: 55, echo: 3, stereoWidth: 144, lowPassEnabled: true, lowPassFrequency: 15800, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 2.7, advancedEq: presetEq([{ enabled: true, gain: 2.5 }, { enabled: true, gain: -1 }, {}, {}, { enabled: true, gain: -0.5 }]) }),
+    ultraslowed: factoryPreset({ label: 'Ultra Slowed', category: 'slowed', icon: 'cloud-fog', description: 'Deep enveloping slow motion', colors: ['#4f46e5', '#7dd3fc'] }, { speed: 0.7, pitch: -1, gainDb: -8, bass: 5, mid: -2, treble: -2, reverb: 68, echo: 5, stereoWidth: 156, lowPassEnabled: true, lowPassFrequency: 13500, compressorEnabled: true, compressorThreshold: -22, compressorRatio: 3.2, advancedEq: presetEq([{ enabled: true, gain: 2.5 }, { enabled: true, gain: -1.5 }, {}, {}, { enabled: true, gain: -1.5 }]) }),
     vocalboost: factoryPreset({ label: 'Vocal Boost', category: 'voice', icon: 'mic-2', description: 'Present vocals with clean dynamics', colors: ['#ec4899', '#22d3ee'] }, { gainDb: -3, bass: -2, mid: 2, treble: 2, vocalBoost: 72, stereoWidth: 105, highPassEnabled: true, highPassFrequency: 75, compressorEnabled: true, compressorThreshold: -20, compressorRatio: 2.8, advancedEq: presetEq([{ enabled: true, gain: -2 }, { enabled: true, gain: -1 }, { enabled: true, frequency: 1600, gain: 2 }, { enabled: true, frequency: 4200, gain: 3 }, {}]) }),
     podcast: factoryPreset({ label: 'Podcast', category: 'voice', icon: 'podcast', description: 'Clear consistent spoken voice', colors: ['#14b8a6', '#8b5cf6'] }, { gainDb: -2, bass: -3, mid: 2, treble: 1, vocalBoost: 60, stereoWidth: 90, highPassEnabled: true, highPassFrequency: 75, lowPassEnabled: true, lowPassFrequency: 16500, compressorEnabled: true, compressorThreshold: -23, compressorRatio: 3.8, advancedEq: presetEq([{ enabled: true, gain: -2 }, { enabled: true, frequency: 280, gain: -2 }, { enabled: true, frequency: 1500, gain: 2 }, { enabled: true, frequency: 3800, gain: 2 }, {}]) }),
   };
@@ -412,6 +412,15 @@
     input.style.setProperty('--range-progress', `${max === min ? 0 : (value - min) / (max - min) * 100}%`);
   }
 
+  function syncSpeedShortcuts() {
+    const speed = Number(state.effects.speed);
+    document.querySelectorAll('[data-speed-value]').forEach((button) => {
+      const active = Math.abs(Number(button.dataset.speedValue) - speed) < 0.005;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+  }
+
   function formatPan(value) { return value === 0 ? 'Center' : `${Math.abs(value)}% ${value < 0 ? 'Left' : 'Right'}`; }
 
   const EFFECT_BINDINGS = [
@@ -471,10 +480,22 @@
         $(outputId).textContent = formatter(state.effects[key]);
         updateRangeFill(input);
         markCustom(section === 'advanced' ? 'advanced' : 'basic', [key]);
+        if (key === 'speed') syncSpeedShortcuts();
         if (section === 'transport') scheduleTransportRestart();
         else engine.setEffectState(state.effects);
       });
     });
+    document.querySelectorAll('[data-speed-value]').forEach((button) => button.addEventListener('click', () => {
+      if (isBusy()) return showBusyMessage();
+      const speed = Number(button.dataset.speedValue);
+      $('speedSlider').value = String(speed);
+      state.effects.speed = speed;
+      $('speedValue').textContent = `${speed.toFixed(2)}x · ${Math.round(speed * 100)}%`;
+      updateRangeFill($('speedSlider'));
+      syncSpeedShortcuts();
+      markCustom('basic', ['speed']);
+      scheduleTransportRestart();
+    }));
     const limiterSelect = $('limiterThresholdSlider');
     limiterSelect.addEventListener('change', () => { if (isBusy()) { syncEffectsToUI(); return showBusyMessage(); } state.effects.limiterThreshold = Number(limiterSelect.value); $('limiterThresholdValue').textContent = `${limiterSelect.value} dB`; markCustom('advanced', ['limiterThreshold']); engine.setEffectState(state.effects); });
   }
@@ -539,6 +560,7 @@
     setSwitch('lowPassToggle', state.effects.lowPassEnabled);
     setSwitch('compressorToggle', state.effects.compressorEnabled);
     setSwitch('limiterToggle', state.effects.limiterEnabled);
+    syncSpeedShortcuts();
     renderAdvancedEq();
   }
 
@@ -888,6 +910,20 @@
     $('studioModeBtn').addEventListener('click', () => setEditorMode('studio', true));
   }
 
+  function bindWorkspaceNavigation() {
+    document.querySelectorAll('[data-panel-target]').forEach((button) => button.addEventListener('click', () => {
+      const panel = $(button.dataset.panelTarget);
+      if (!panel) return;
+      panel.open = true;
+      document.querySelectorAll('[data-panel-target]').forEach((item) => item.classList.toggle('active', item === button));
+      window.setTimeout(() => panel.scrollIntoView({ behavior: 'smooth', block: 'start' }), 40);
+    }));
+    document.querySelectorAll('.editor-panel').forEach((panel) => panel.addEventListener('toggle', () => {
+      if (!panel.open) return;
+      document.querySelectorAll('[data-panel-target]').forEach((button) => button.classList.toggle('active', button.dataset.panelTarget === panel.id));
+    }));
+  }
+
   function bindAdvanced() {
     bindSwitch('eightDToggle', 'eightD', { control: 'eightDSpeed', section: 'basic', rebuild: true });
     bindSwitch('highPassToggle', 'highPassEnabled', { section: 'advanced' }); bindSwitch('lowPassToggle', 'lowPassEnabled', { section: 'advanced' });
@@ -923,7 +959,7 @@
     try { state.userPresets = Core.parsePresetCollection(localStorage.getItem(PRESET_STORAGE_KEY)); } catch (error) { state.userPresets = []; }
     try { setEditorMode(localStorage.getItem(UI_MODE_STORAGE_KEY), false); } catch (error) { setEditorMode('studio', false); }
     renderFactoryPresets(); renderUserPresets(); renderAdvancedEq(); syncEffectsToUI();
-    bindUpload(); bindPlayer(); bindWaveform(); bindEditing(); bindEffectControls(); bindAdvanced(); bindPresets(); bindEditorMode(); bindKeyboard();
+    bindUpload(); bindPlayer(); bindWaveform(); bindEditing(); bindEffectControls(); bindAdvanced(); bindPresets(); bindEditorMode(); bindWorkspaceNavigation(); bindKeyboard();
     document.querySelectorAll('input[type="range"]').forEach(updateRangeFill);
     document.querySelectorAll('input[name="exportFormat"]').forEach((input) => input.addEventListener('change', updateExportUI));
     $('downloadBtn').addEventListener('click', exportCurrentAudio); $('autoProtectBtn').addEventListener('click', autoProtectFromClipping); updateExportUI(); updateSelectionUI(); updateHistoryButtons();
