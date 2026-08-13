@@ -34,8 +34,11 @@
     const slowDepth = clamp((1 - playbackRate) / 0.75, 0, 1);
     const fastDepth = clamp(playbackRate - 1, 0, 1);
     const pitchDepth = clamp(Math.abs(detune) / 1300, 0, 1);
-    const grainSize = clamp(0.2 + slowDepth * 0.18 - fastDepth * 0.06 + pitchDepth * 0.035, 0.14, 0.42);
-    const overlap = clamp(grainSize * (0.5 + slowDepth * 0.08), 0.07, 0.24);
+    // Keep grains long enough to avoid a metallic flutter, but keep their
+    // crossfade short. Large overlaps make transients arrive twice and sound
+    // like a second, delayed copy of the track.
+    const grainSize = clamp(0.16 + slowDepth * 0.08 - fastDepth * 0.035 + pitchDepth * 0.02, 0.13, 0.27);
+    const overlap = clamp(0.055 + slowDepth * 0.025 + pitchDepth * 0.01, 0.05, 0.095);
     return {
       playbackRate,
       detune,
@@ -43,6 +46,17 @@
       overlap: Number(overlap.toFixed(3)),
       loop: false,
     };
+  }
+
+  function granularRequired(state, compareMode) {
+    if (compareMode === 'original') return false;
+    const granular = granularPlaybackOptions(state);
+    return Math.abs(granular.playbackRate - 1) > 0.0001 || Math.abs(granular.detune) > 0.01;
+  }
+
+  function transportNeedsRestart(sourceKind, playing, state, compareMode) {
+    if (!playing || !sourceKind) return false;
+    return (sourceKind === 'grain') !== granularRequired(state, compareMode);
   }
 
   function isIOSDevice() {
@@ -303,6 +317,7 @@
       this.graph = null;
       this.source = null;
       this.sourceKind = '';
+      this.playRequestId = 0;
       this.analyser = null;
       this.monitorGain = null;
       this.meterTimer = null;
@@ -406,6 +421,12 @@
       if (this.monitorGain) this.monitorGain.gain.value = clamp(state.volume, 0, 150) / 100;
     }
 
+    updateTransportEffectState(state) {
+      const requiresRestart = transportNeedsRestart(this.sourceKind, this.playing, state, this.compareMode);
+      this.setEffectState(state);
+      return requiresRestart;
+    }
+
     setCompareMode(mode) {
       this.compareMode = mode === 'original' ? 'original' : 'modified';
     }
@@ -450,9 +471,7 @@
     }
 
     sourceNeedsGranular() {
-      if (this.compareMode === 'original') return false;
-      const granular = granularPlaybackOptions(this.effectState);
-      return Math.abs(granular.playbackRate - 1) > 0.0001 || Math.abs(granular.detune) > 0.01;
+      return granularRequired(this.effectState, this.compareMode);
     }
 
     createSource() {
@@ -475,8 +494,11 @@
     }
 
     async play(offset) {
+      const requestId = ++this.playRequestId;
       await this.ensureRunning();
+      if (requestId !== this.playRequestId) return false;
       await this.ensureGraph();
+      if (requestId !== this.playRequestId) return false;
       const buffer = this.sourceBuffer();
       if (!buffer) throw new Error('Load an audio file first.');
       const maxOffset = Math.max(0, buffer.duration - 1 / buffer.sampleRate);
@@ -489,6 +511,7 @@
       this.source.start(this.startedAt, safeOffset);
       this.playing = true;
       this.startMeter();
+      return true;
     }
 
     pause() {
@@ -500,6 +523,7 @@
     }
 
     stop(resetOffset) {
+      this.playRequestId += 1;
       if (this.source) {
         try { this.source.stop(); } catch (error) {}
       }
@@ -571,6 +595,8 @@
     createToneEffectGraph,
     disposeToneGraph,
     granularPlaybackOptions,
+    granularRequired,
+    transportNeedsRestart,
     isIOSDevice,
     mapFilterType,
     updateGraphValues,
