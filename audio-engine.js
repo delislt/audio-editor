@@ -27,39 +27,12 @@
     return Math.pow(10, Number(db) / 20);
   }
 
-  function granularPlaybackOptions(state) {
+  function playbackRateForState(state, compareMode) {
+    if (compareMode === 'original') return 1;
     const effects = state || {};
-    const playbackRate = clamp(effects.speed, 0.25, 2);
-    const detune = clamp(effects.pitch, -12, 12) * 100 + clamp(effects.fineTune, -100, 100);
-    const slowDepth = clamp((1 - playbackRate) / 0.75, 0, 1);
-    const fastDepth = clamp(playbackRate - 1, 0, 1);
-    const pitchDepth = clamp(Math.abs(detune) / 1300, 0, 1);
-    // Keep grains long enough to avoid a metallic flutter, but keep their
-    // crossfade short. Large overlaps make transients arrive twice and sound
-    // like a second, delayed copy of the track.
-    const grainSize = clamp(0.16 + slowDepth * 0.08 - fastDepth * 0.035 + pitchDepth * 0.02, 0.13, 0.27);
-    const overlap = clamp(0.055 + slowDepth * 0.025 + pitchDepth * 0.01, 0.05, 0.095);
-    return {
-      playbackRate,
-      detune,
-      grainSize: Number(grainSize.toFixed(3)),
-      overlap: Number(overlap.toFixed(3)),
-      loop: false,
-    };
-  }
-
-  function granularRequired(state, compareMode) {
-    if (compareMode === 'original') return false;
-    const granular = granularPlaybackOptions(state);
-    // A regular Player is the cleanest possible slowed source. It naturally
-    // lowers pitch together with tempo and never layers grains. Granular
-    // playback is only necessary when pitch must move independently.
-    return Math.abs(granular.detune) > 0.01;
-  }
-
-  function transportNeedsRestart(sourceKind, playing, state, compareMode) {
-    if (!playing || !sourceKind) return false;
-    return (sourceKind === 'grain') !== granularRequired(state, compareMode);
+    const speed = clamp(effects.speed, 0.25, 2);
+    const semitones = clamp(effects.pitch, -12, 12) + clamp(effects.fineTune, -100, 100) / 100;
+    return speed * Math.pow(2, semitones / 12);
   }
 
   function isIOSDevice() {
@@ -417,26 +390,20 @@
       this.effectState = state;
       updateGraphValues(this.graph, state);
       if (this.source) {
-        const granular = granularPlaybackOptions(state);
-        this.source.playbackRate = granular.playbackRate;
-        if (this.sourceKind === 'grain') {
-          this.source.detune = granular.detune;
-          this.source.grainSize = granular.grainSize;
-          this.source.overlap = granular.overlap;
-        }
-        if (wasPlaying && Math.abs(this.speedAtStart - granular.playbackRate) > 0.0001) {
+        const playbackRate = this.sourceSpeed();
+        this.source.playbackRate = playbackRate;
+        if (wasPlaying && Math.abs(this.speedAtStart - playbackRate) > 0.0001) {
           this.startedOffset = offsetBeforeChange;
           this.startedAt = getTone().now();
-          this.speedAtStart = granular.playbackRate;
+          this.speedAtStart = playbackRate;
         }
       }
       if (this.monitorGain) this.monitorGain.gain.value = clamp(state.volume, 0, 150) / 100;
     }
 
     updateTransportEffectState(state) {
-      const requiresRestart = transportNeedsRestart(this.sourceKind, this.playing, state, this.compareMode);
       this.setEffectState(state);
-      return requiresRestart;
+      return false;
     }
 
     setCompareMode(mode) {
@@ -448,7 +415,7 @@
     }
 
     sourceSpeed() {
-      return this.compareMode === 'original' ? 1 : clamp(this.effectState && this.effectState.speed, 0.25, 2);
+      return playbackRateForState(this.effectState, this.compareMode);
     }
 
     currentOffset() {
@@ -482,27 +449,14 @@
       if (wasPlaying) await this.play(offset);
     }
 
-    sourceNeedsGranular() {
-      return granularRequired(this.effectState, this.compareMode);
-    }
-
     createSource() {
       const Tone = getTone();
       const buffer = this.sourceBuffer();
       if (!buffer) throw new Error('Load an audio file first.');
       this.disposeSource();
-      if (this.sourceNeedsGranular()) {
-        const granular = granularPlaybackOptions(this.effectState);
-        this.source = new Tone.GrainPlayer({
-          url: buffer,
-          ...granular,
-        });
-        this.sourceKind = 'grain';
-      } else {
-        this.source = new Tone.Player(buffer);
-        this.source.playbackRate = this.sourceSpeed();
-        this.sourceKind = 'dry';
-      }
+      this.source = new Tone.Player(buffer);
+      this.source.playbackRate = this.sourceSpeed();
+      this.sourceKind = 'single';
       this.source.connect(this.compareMode === 'original' ? this.graph.bypassInput : this.graph.input);
     }
 
@@ -607,9 +561,7 @@
     AudioEngine,
     createToneEffectGraph,
     disposeToneGraph,
-    granularPlaybackOptions,
-    granularRequired,
-    transportNeedsRestart,
+    playbackRateForState,
     isIOSDevice,
     mapFilterType,
     updateGraphValues,

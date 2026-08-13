@@ -7,6 +7,8 @@ const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const script = fs.readFileSync(path.join(root, 'script.js'), 'utf8');
 const styles = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
+const audioEngine = fs.readFileSync(path.join(root, 'audio-engine.js'), 'utf8');
+const exportEngine = fs.readFileSync(path.join(root, 'export-engine.js'), 'utf8');
 
 test('all DOM ids referenced by the application exist and are unique', () => {
   const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
@@ -105,4 +107,11 @@ test('slowed presets use one continuous source without pitch grains or echo', ()
     assert.doesNotMatch(preset[1], /\bfineTune\s*:/);
     assert.match(preset[1], /\becho:\s*0\b/);
   });
+});
+
+test('pitch and export never construct layered grain players', () => {
+  assert.doesNotMatch(audioEngine, /GrainPlayer|grainSize|overlap/);
+  assert.doesNotMatch(exportEngine, /GrainPlayer|grainSize|overlap/);
+  assert.match(audioEngine, /function playbackRateForState\(/);
+  assert.match(exportEngine, /playbackRateForState\(state, 'modified'\)/);
 });

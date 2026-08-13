@@ -30,23 +30,15 @@
     const engineApi = requireBrowserDependency('The audio engine', root.AudioEditorEngine);
     if (!buffer || !buffer.numberOfChannels || !buffer.length) throw new Error('There is no audio to export.');
     const state = effectState || {};
-    const speed = clamp(state.speed, 0.25, 2);
+    const playbackRate = engineApi.playbackRateForState(state, 'modified');
     const channels = Number(exportSettings.channels) === 1 ? 1 : 2;
     const sampleRate = Number(exportSettings.sampleRate) === 48000 ? 48000 : 44100;
-    const duration = Math.max(0.02, buffer.duration / speed + effectTailSeconds(state));
+    const duration = Math.max(0.02, buffer.duration / playbackRate + effectTailSeconds(state));
     report(onProgress, 0.03, 'Rendering effects...');
     const rendered = await Tone.Offline(async () => {
       const graph = engineApi.createToneEffectGraph(state, { toDestination: true });
-      let source;
-      if (!engineApi.granularRequired(state, 'modified')) {
-        source = new Tone.Player(buffer);
-        source.playbackRate = speed;
-      } else {
-        source = new Tone.GrainPlayer({
-          url: buffer,
-          ...engineApi.granularPlaybackOptions(state),
-        });
-      }
+      const source = new Tone.Player(buffer);
+      source.playbackRate = playbackRate;
       source.connect(graph.input);
       source.start(0, 0);
     }, duration, channels, sampleRate);

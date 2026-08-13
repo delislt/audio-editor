@@ -461,15 +461,8 @@
   }
 
   function scheduleTransportRestart() {
-    const requiresRestart = engine.updateTransportEffectState(state.effects);
     clearTimeout(state.transportRestartTimer);
-    if (!requiresRestart) return;
-    state.transportRestartTimer = setTimeout(async () => {
-      if (!engine.playing) return;
-      const position = engine.currentOffset();
-      engine.pause();
-      try { await engine.play(position); playbackLoop(); } catch (error) { showMessage(error.message, 'error'); }
-    }, 80);
+    engine.updateTransportEffectState(state.effects);
   }
 
   function bindEffectControls() {

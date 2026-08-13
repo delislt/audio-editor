@@ -12,7 +12,7 @@ Live site: https://delislt.github.io/audio-editor/
 - Zoomable and horizontally scrollable waveform with touch, pen and mouse selection.
 - Trim, cut, copy, paste, delete, reverse, fade in, fade out, normalize and remove silence.
 - Bounded Undo/Redo history and immutable original audio for Reset All and Original/Modified comparison.
-- Independent Speed/Tempo and Pitch through Tone.js granular synthesis, with adaptive grain windows for smoother slowed audio and a dry player bypass at neutral values.
+- Clean tape-style Speed/Tempo and Pitch through one continuous Tone.js player, without layered grains or doubled transients.
 - Fine tuning in cents, processing gain, Bass/Mid/Treble and five configurable advanced EQ bands.
 - Reverb, echo, pan, 8D orbit, vocal boost, stereo width, distortion, high-pass, low-pass, compressor and limiter.
 - 24 complete factory presets, including four progressively slowed profiles tuned for cleaner ambience.
@@ -42,7 +42,7 @@ Player volume is monitor-only and is intentionally excluded from exports. Proces
 
 | Dependency | Version | License | Purpose |
 | --- | --- | --- | --- |
-| Tone.js | 14.8.49 | MIT | Web Audio graph, granular time/pitch processing and offline rendering |
+| Tone.js | 14.8.49 | MIT | Web Audio graph, single-source tape-style time/pitch processing and offline rendering |
 | lamejs | 1.2.1 | LGPL-3.0 | Client-side MP3 encoding |
 | @wasm-audio-decoders/flac | 0.2.10 | MIT | Reliable FLAC import where native browser decoding is unavailable |
 | Lucide | 1.27.0 | ISC | Interface icons loaded from a version-pinned CDN URL |
@@ -52,7 +52,7 @@ Player volume is monitor-only and is intentionally excluded from exports. Proces
 
 Mediabunny and its codec extensions are version-pinned under `vendor/mediabunny-1.53.0/` so FLAC and M4A/AAC export does not depend on a runtime package CDN. The bundled MPL-2.0 license is included beside those files.
 
-Tone.js granular synthesis was selected because the existing project already depends on Tone.js and its `GrainPlayer` independently controls `playbackRate` and `detune`. Dedicated WebAssembly encoders were added only where browser APIs do not provide portable static-site encoding.
+Tone.js drives a single continuous `Player` for both speed and pitch. This tape-style approach deliberately changes pitch and tempo together so playback stays free of layered grains, doubled transients, and phase artifacts. Dedicated WebAssembly encoders are used only where browser APIs do not provide portable static-site encoding.
 
 ## Development and verification
 

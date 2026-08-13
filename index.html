@@ -137,8 +137,8 @@
         <details id="basicPanel" class="editor-panel glass-card basic-editor-panel" open>
           <summary><span><i data-lucide="sliders-horizontal"></i><strong>Basic</strong><small>Tempo, pitch and tone</small></span><i data-lucide="chevron-down"></i></summary>
           <div class="panel-content control-grid-v3">
-            <div class="control-field tempo-control"><label for="speedSlider">Speed / Tempo <output id="speedValue">1.00x · 100%</output></label><input type="range" id="speedSlider" min="0.25" max="2" step="0.01" value="1" aria-describedby="tempoQualityHint"><small class="control-note" id="tempoQualityHint">Adaptive smoothing keeps slowed playback natural.</small><div class="tempo-shortcuts" role="group" aria-label="Speed shortcuts"><button type="button" data-speed-value="0.75">0.75x</button><button type="button" data-speed-value="0.85">0.85x</button><button type="button" data-speed-value="1">1.00x</button><button type="button" data-speed-value="1.25">1.25x</button></div></div>
-            <label class="control-field"><span>Pitch <output id="pitchValue">0 st</output></span><input type="range" id="pitchSlider" min="-12" max="12" step="0.1" value="0"></label>
+            <div class="control-field tempo-control"><label for="speedSlider">Speed / Tempo <output id="speedValue">1.00x · 100%</output></label><input type="range" id="speedSlider" min="0.25" max="2" step="0.01" value="1" aria-describedby="tempoQualityHint"><small class="control-note" id="tempoQualityHint">Single-source playback keeps slowed audio clean.</small><div class="tempo-shortcuts" role="group" aria-label="Speed shortcuts"><button type="button" data-speed-value="0.75">0.75x</button><button type="button" data-speed-value="0.85">0.85x</button><button type="button" data-speed-value="1">1.00x</button><button type="button" data-speed-value="1.25">1.25x</button></div></div>
+            <label class="control-field"><span>Pitch <output id="pitchValue">0 st</output></span><input type="range" id="pitchSlider" min="-12" max="12" step="0.1" value="0" aria-describedby="pitchQualityHint"><small class="control-note" id="pitchQualityHint">Clean tape-style pitch uses one continuous source.</small></label>
             <label class="control-field studio-only-control"><span>Fine Tune <output id="fineTuneValue">0 cents</output></span><input type="range" id="fineTuneSlider" min="-100" max="100" step="1" value="0"></label>
             <label class="control-field"><span>Monitor Volume <output id="volumeValue">100%</output></span><input type="range" id="volumeSlider" min="0" max="150" step="1" value="100"></label>
             <label class="control-field studio-only-control"><span>Processing Gain <output id="gainValue">0 dB</output></span><input type="range" id="gainSlider" min="-12" max="12" step="0.1" value="0"></label>
@@ -206,8 +206,8 @@
   <script src="vendor/mediabunny-1.53.0/mediabunny-aac-encoder.min.js"></script>
   <script src="vendor/mediabunny-1.53.0/mediabunny-flac-encoder.min.js"></script>
   <script src="audio-editor-core.js?v=20260812-1"></script>
-  <script src="audio-engine.js?v=20260812-4"></script>
-  <script src="export-engine.js?v=20260812-4"></script>
-  <script src="script.js?v=20260812-4"></script>
+  <script src="audio-engine.js?v=20260812-5"></script>
+  <script src="export-engine.js?v=20260812-5"></script>
+  <script src="script.js?v=20260812-5"></script>
 </body>
 </html>
