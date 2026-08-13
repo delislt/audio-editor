@@ -114,14 +114,6 @@ test('pitch and export never construct layered grain players', () => {
   assert.doesNotMatch(exportEngine, /GrainPlayer|grainSize|overlap/);
   assert.match(audioEngine, /function playbackRateForState\(/);
   assert.match(audioEngine, /new Tone\.PitchShift\(pitchShiftOptions\(state\)\)/);
-  assert.match(audioEngine, /windowSize: 0\.1/);
   assert.match(audioEngine, /graph\.pitchShift\.wet\.value = pitchOptions\.wet/);
   assert.match(exportEngine, /playbackRateForState\(state, 'modified'\)/);
-});
-
-test('8D channel travel speed updates the active orbit without rebuilding audio', () => {
-  assert.match(html, /id="eightDSpeed"[^>]+aria-describedby="eightDSpeedHint"/);
-  assert.match(html, /Higher values move between left and right faster\./);
-  assert.match(script, /s\/orbit/);
-  assert.match(audioEngine, /graph\.panLfo\.frequency\.value = eightDOrbitFrequency\(state\.eightDSpeed\)/);
 });

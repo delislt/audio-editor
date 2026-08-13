@@ -37,22 +37,14 @@
     const effects = state || {};
     const pitch = clamp(effects.pitch == null ? 0 : effects.pitch, -12, 12)
       + clamp(effects.fineTune == null ? 0 : effects.fineTune, -100, 100) / 100;
+    const depth = Math.min(1, Math.abs(pitch) / 12);
     return {
       pitch,
-      // Tone.js recommends up to 100 ms for smoother transposition. Keeping
-      // that full analysis window is especially important for fine tuning:
-      // the previous 40 ms minimum made small shifts sound metallic/robotic.
-      windowSize: 0.1,
+      windowSize: Number((0.04 + depth * 0.04).toFixed(3)),
       delayTime: 0,
       feedback: 0,
       wet: Math.abs(pitch) > 0.0001 ? 1 : 0,
     };
-  }
-
-  function eightDOrbitFrequency(speed) {
-    // The UI exposes a 0.5x–5x multiplier. At 1x a full left-right-left
-    // orbit takes four seconds; higher values move proportionally faster.
-    return clamp(speed == null ? 2 : speed, 0.5, 5) / 4;
   }
 
   function isIOSDevice() {
@@ -190,7 +182,7 @@
     if (state.eightD) {
       graph.pan.pan.value = 0;
       graph.panLfo = new Tone.LFO({
-        frequency: eightDOrbitFrequency(state.eightDSpeed),
+        frequency: clamp(state.eightDSpeed, 0.5, 5) / (Math.PI * 2),
         min: -1,
         max: 1,
       });
@@ -292,7 +284,6 @@
     graph.vocalCompressor.ratio.value = vocal > 0 ? 1 + 2 * vocal : 1;
     graph.widthSideGain.gain.value = clamp(state.stereoWidth, 0, 200) / 100;
     if (!state.eightD) graph.pan.pan.value = clamp(state.pan, -100, 100) / 100;
-    if (graph.panLfo) graph.panLfo.frequency.value = eightDOrbitFrequency(state.eightDSpeed);
     graph.distortion.distortion = clamp(state.distortionDrive, 0, 100) / 100;
     graph.distortion.wet.value = clamp(state.distortionMix, 0, 100) / 100;
     const echo = clamp(state.echo, 0, 100) / 100;
@@ -589,7 +580,6 @@
     disposeToneGraph,
     playbackRateForState,
     pitchShiftOptions,
-    eightDOrbitFrequency,
     isIOSDevice,
     mapFilterType,
     updateGraphValues,

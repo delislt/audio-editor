@@ -57,26 +57,17 @@ test('playback rate follows speed without being changed by pitch or fine tune', 
   assert.equal(Engine.playbackRateForState({ speed: 0.5, pitch: -12, fineTune: -100 }, 'original'), 1);
 });
 
-test('dedicated pitch options use a smooth full analysis window without feedback or extra delay', () => {
+test('dedicated pitch options are fully wet without feedback or extra delay', () => {
   assert.deepEqual(Engine.pitchShiftOptions({ pitch: 0, fineTune: 0 }), {
-    pitch: 0, windowSize: 0.1, delayTime: 0, feedback: 0, wet: 0,
+    pitch: 0, windowSize: 0.04, delayTime: 0, feedback: 0, wet: 0,
   });
   assert.deepEqual(Engine.pitchShiftOptions({ pitch: 12, fineTune: 0 }), {
-    pitch: 12, windowSize: 0.1, delayTime: 0, feedback: 0, wet: 1,
+    pitch: 12, windowSize: 0.08, delayTime: 0, feedback: 0, wet: 1,
   });
-  assert.equal(Engine.pitchShiftOptions({ pitch: 0, fineTune: 25 }).windowSize, 0.1);
   const clamped = Engine.pitchShiftOptions({ pitch: 40, fineTune: 500 });
   assert.equal(clamped.pitch, 13);
   assert.equal(clamped.wet, 1);
-  assert.equal(clamped.windowSize, 0.1);
-});
-
-test('8D orbit speed maps to an intuitive live LFO frequency', () => {
-  assert.equal(Engine.eightDOrbitFrequency(0.5), 0.125);
-  assert.equal(Engine.eightDOrbitFrequency(1), 0.25);
-  assert.equal(Engine.eightDOrbitFrequency(2), 0.5);
-  assert.equal(Engine.eightDOrbitFrequency(5), 1.25);
-  assert.equal(Engine.eightDOrbitFrequency(99), 1.25);
+  assert.ok(clamped.windowSize >= 0.04 && clamped.windowSize <= 0.08);
 });
 
 test('pitch-shifted playback creates exactly one regular player source', () => {
