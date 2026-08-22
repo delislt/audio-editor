@@ -53,12 +53,19 @@ test('factory presets and accessible effect switches remain available', () => {
   const factoryBlock = script.match(/const FACTORY_PRESETS = \{([\s\S]*?)^  \};/m);
   assert.ok(factoryBlock, 'factory preset collection is missing');
   const presetCount = [...factoryBlock[1].matchAll(/^    (?:'[^']+'|[a-z0-9]+):/gm)].length;
-  assert.equal(presetCount, 24);
-  ['Normal', 'Nightcore', 'Deep Bass', '8D Orbit', 'Vocal Boost', 'Podcast']
+  assert.equal(presetCount, 25);
+  ['Normal', 'Nightcore', 'Deep Bass', '8D Orbit', 'Club Bathroom', 'Vocal Boost', 'Podcast']
     .forEach((label) => assert.ok(factoryBlock[1].includes(`label: '${label}'`)));
-  assert.equal([...factoryBlock[1].matchAll(/factoryPreset\(/g)].length, 24);
+  assert.equal([...factoryBlock[1].matchAll(/factoryPreset\(/g)].length, 25);
   ['fineTune', 'gainDb', 'mid', 'advancedEq', 'vocalBoost', 'stereoWidth', 'distortionDrive', 'highPassEnabled', 'compressorEnabled']
     .forEach((property) => assert.ok(factoryBlock[1].includes(property), `${property} is not used by the factory presets`));
+  const clubBathroom = factoryBlock[1].match(/^    clubbathroom: (.*)$/m);
+  assert.ok(clubBathroom, 'Club Bathroom preset is missing');
+  assert.match(clubBathroom[1], /\bbass:\s*6\b/);
+  assert.match(clubBathroom[1], /\breverb:\s*46\b/);
+  assert.match(clubBathroom[1], /\blowPassEnabled:\s*true\b/);
+  assert.match(clubBathroom[1], /\blowPassFrequency:\s*4800\b/);
+  assert.doesNotMatch(clubBathroom[1], /\b(?:speed|pitch|fineTune)\s*:/);
   ['eightDToggle', 'highPassToggle', 'lowPassToggle', 'compressorToggle', 'limiterToggle']
     .forEach((id) => assert.match(html, new RegExp(`id="${id}"[^>]+aria-label="[^"]+"`)));
   assert.match(html, /id="resetEffectBtn"[^>]+disabled>Reset Last Effect/);

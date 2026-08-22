@@ -15,7 +15,7 @@ Live site: https://delislt.github.io/audio-editor/
 - Independent Speed/Tempo and Pitch through one continuous Tone.js player plus a fully wet dedicated pitch processor, without layered grain sources.
 - Fine tuning in cents, processing gain, Bass/Mid/Treble and five configurable advanced EQ bands.
 - Reverb, echo, pan, 8D orbit, vocal boost, stereo width, distortion, high-pass, low-pass, compressor and limiter.
-- 24 complete factory presets, including four progressively slowed profiles tuned for cleaner ambience.
+- 25 complete factory presets, including Club Bathroom and four progressively slowed profiles tuned for cleaner ambience.
 - Versioned custom presets stored locally with save, apply, rename and delete actions.
 - Output metering with peak, RMS and clipping indication after the processing chain.
 - Full-track automatic clipping protection that adjusts processing gain only when necessary and enables a -1 dB limiter.
