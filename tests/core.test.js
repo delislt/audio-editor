@@ -115,6 +115,17 @@ test('history provides bounded undo and redo snapshots', () => {
   assert.deepEqual(values(next.buffer), [3]);
 });
 
+test('history can transfer immutable snapshots without duplicating channel storage', () => {
+  const history = new core.AudioHistory({ maxEntries: 2, maxBytes: 1024 * 1024, cloneBuffers: false });
+  const previousState = { buffer: makeBuffer([[1, 2]], 2), selection: null, playhead: 0, label: 'previous' };
+  const currentState = { buffer: makeBuffer([[3, 4]], 2), selection: null, playhead: 0, label: 'current' };
+  history.push(previousState);
+  const previous = history.undo(currentState);
+  assert.equal(previous.buffer, previousState.buffer);
+  const current = history.redo(previous);
+  assert.equal(current.buffer, currentState.buffer);
+});
+
 test('file size and format metadata are deterministic', () => {
   assert.equal(core.formatFileSize(1536), '1.5 KB');
   assert.equal(core.formatFileSize(8.4 * 1024 * 1024), '8.4 MB');
@@ -151,3 +162,4 @@ test('dB conversions and export settings validation stay finite', () => {
   });
   assert.equal(core.validateExportSettings({ sampleRate: 96000 }).sampleRate, 44100);
 });
+

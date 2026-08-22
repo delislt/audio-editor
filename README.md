@@ -107,4 +107,5 @@ Shortcuts are not intercepted while typing in an input, textarea or select.
 
 The app centralizes audio startup around the first user gesture, resumes the shared context when necessary and does not create a new `AudioContext` for every operation. FLAC decoding has WebAssembly and native fallback paths. Pointer Events power waveform selection on mouse and touch devices.
 
-All the processing stays on the user's device. Large files and long, high-quality exports require browser memory proportional to decoded and rendered audio duration.
+All the processing stays on the user's device. The editor reuses Web Audio channel storage for its data views, keeps history byte-bounded and renders only the visible slice of a zoomed waveform. Large files and long, high-quality exports still require browser memory proportional to decoded and rendered audio duration.
+

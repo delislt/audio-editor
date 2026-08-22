@@ -166,8 +166,12 @@
     assertBufferData(clipboard);
     const targetLength = bufferLength(buffer);
     const insertFrame = clamp(Math.round(clamp(time, 0, bufferDuration(buffer)) * buffer.sampleRate), 0, targetLength);
-    const converted = convertClipboardChannels(clipboard, buffer.channels.length)
-      .map((channel) => resampleChannelLinear(channel, clipboard.sampleRate, buffer.sampleRate));
+    const channelMatched = clipboard.channels.length === buffer.channels.length
+      ? clipboard.channels
+      : convertClipboardChannels(clipboard, buffer.channels.length);
+    const converted = clipboard.sampleRate === buffer.sampleRate
+      ? channelMatched
+      : channelMatched.map((channel) => resampleChannelLinear(channel, clipboard.sampleRate, buffer.sampleRate));
     const insertedLength = converted[0].length;
     const channels = buffer.channels.map((channel, index) => {
       const output = new Float32Array(targetLength + insertedLength);
@@ -262,8 +266,8 @@
     const length = bufferLength(buffer);
     const windowFrames = Math.max(1, Math.round(sampleRate * 0.02));
     const minimumFrames = Math.round(minimumDuration * sampleRate);
-    const silentWindows = [];
-
+    const intervals = [];
+    let runStart = null;
     for (let start = 0; start < length; start += windowFrames) {
       const end = Math.min(length, start + windowFrames);
       let sumSquares = 0;
@@ -276,16 +280,11 @@
         }
       }
       const rms = Math.sqrt(sumSquares / Math.max(1, samples));
-      silentWindows.push({ start, end, silent: rms <= threshold });
-    }
-
-    const intervals = [];
-    let runStart = null;
-    silentWindows.forEach((window, index) => {
-      if (window.silent && runStart === null) runStart = window.start;
-      const atEnd = index === silentWindows.length - 1;
-      if (runStart !== null && (!window.silent || atEnd)) {
-        const runEnd = window.silent && atEnd ? window.end : window.start;
+      const silent = rms <= threshold;
+      if (silent && runStart === null) runStart = start;
+      const atEnd = end === length;
+      if (runStart !== null && (!silent || atEnd)) {
+        const runEnd = silent && atEnd ? end : start;
         if (runEnd - runStart >= minimumFrames) {
           const safetyPadding = Math.min(Math.round(sampleRate * 0.015), Math.floor((runEnd - runStart) / 4));
           const start = runStart + safetyPadding;
@@ -294,7 +293,7 @@
         }
         runStart = null;
       }
-    });
+    }
 
     const removedFrames = intervals.reduce((total, interval) => total + interval.end - interval.start, 0);
     return {
@@ -438,10 +437,10 @@
     return JSON.stringify({ presetSchemaVersion: PRESET_SCHEMA_VERSION, presets: parsePresetCollection({ presetSchemaVersion: PRESET_SCHEMA_VERSION, presets }) });
   }
 
-  function cloneSnapshot(snapshot) {
+  function snapshotValue(snapshot, cloneBuffer) {
     if (!snapshot || !snapshot.buffer) throw new Error('Invalid history snapshot.');
     return {
-      buffer: cloneBufferData(snapshot.buffer),
+      buffer: cloneBuffer ? cloneBufferData(snapshot.buffer) : snapshot.buffer,
       selection: snapshot.selection ? { start: snapshot.selection.start, end: snapshot.selection.end } : null,
       playhead: Number(snapshot.playhead) || 0,
       label: String(snapshot.label || ''),
@@ -452,6 +451,7 @@
     constructor(options) {
       this.maxEntries = clamp(options && options.maxEntries || 12, 1, 50);
       this.maxBytes = clamp(options && options.maxBytes || 256 * 1024 * 1024, 1024 * 1024, 1024 * 1024 * 1024);
+      this.cloneBuffers = !(options && options.cloneBuffers === false);
       this.undoStack = [];
       this.redoStack = [];
       this.undoBytes = 0;
@@ -459,7 +459,7 @@
     }
 
     _entry(snapshot) {
-      const value = cloneSnapshot(snapshot);
+      const value = snapshotValue(snapshot, this.cloneBuffers);
       return { value, bytes: bufferByteLength(value.buffer) };
     }
 
@@ -486,7 +486,7 @@
       this.redoBytes += current.bytes;
       const entry = this.undoStack.pop();
       this.undoBytes -= entry.bytes;
-      return cloneSnapshot(entry.value);
+      return snapshotValue(entry.value, this.cloneBuffers);
     }
 
     redo(currentSnapshot) {
@@ -497,7 +497,7 @@
       this._trimUndo();
       const entry = this.redoStack.pop();
       this.redoBytes -= entry.bytes;
-      return cloneSnapshot(entry.value);
+      return snapshotValue(entry.value, this.cloneBuffers);
     }
 
     clear() {
@@ -548,3 +548,4 @@
     xToTime,
   };
 });
+

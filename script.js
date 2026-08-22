@@ -76,7 +76,7 @@
   const state = {
     originalData: null, workingData: null, originalBuffer: null, workingBuffer: null,
     clipboard: null, selection: null, playhead: 0, zoom: 1, compareMode: 'modified',
-    effects: defaultEffects(), history: new Core.AudioHistory({ maxEntries: 12, maxBytes: 256 * 1024 * 1024 }),
+    effects: defaultEffects(), history: new Core.AudioHistory({ maxEntries: 12, maxBytes: 256 * 1024 * 1024, cloneBuffers: false }),
     file: null, activePreset: 'normal', userPresets: [], lastEffectKeys: [], draggingSelection: false,
     pointerStartX: 0, pointerStartTime: 0, animationFrame: 0, transportRestartTimer: 0,
     lastSection: 'basic', loading: false, exporting: false, editorMode: 'studio',
@@ -87,6 +87,9 @@
   let canvasContext;
   let waveformBaseCanvas;
   let waveformCacheKey = '';
+  let waveformPeaks;
+  let waveformPeakCacheKey = '';
+  let waveformScrollFrame = 0;
 
   function normalizeEffects(input) {
     const defaults = defaultEffects();
@@ -127,7 +130,7 @@
   }
 
   function nativeToData(buffer) {
-    return { sampleRate: buffer.sampleRate, channels: Array.from({ length: buffer.numberOfChannels }, (_, index) => new Float32Array(buffer.getChannelData(index))) };
+    return { sampleRate: buffer.sampleRate, channels: Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index)) };
   }
 
   function nativeBufferPeak(buffer) {
@@ -163,8 +166,8 @@
   function restoreSnapshot(snapshot) {
     if (!snapshot) return;
     engine.stop();
-    state.workingData = Core.cloneBufferData(snapshot.buffer);
-    state.workingBuffer = dataToNative(state.workingData);
+    state.workingBuffer = dataToNative(snapshot.buffer);
+    state.workingData = nativeToData(state.workingBuffer);
     state.selection = Core.normalizeSelection(snapshot.selection, currentDuration());
     state.playhead = Core.clamp(snapshot.playhead, 0, currentDuration());
     engine.setWorkingBuffer(state.workingBuffer);
@@ -174,8 +177,8 @@
   function setWorkingData(data, selection, playhead) {
     Core.assertBufferData(data);
     engine.stop();
-    state.workingData = data;
     state.workingBuffer = dataToNative(data);
+    state.workingData = nativeToData(state.workingBuffer);
     state.selection = Core.normalizeSelection(selection, Core.bufferDuration(data));
     state.playhead = Core.clamp(playhead, 0, Core.bufferDuration(data));
     engine.setWorkingBuffer(state.workingBuffer);
@@ -211,7 +214,10 @@
   }
 
   function updateAfterBufferChange() {
+    waveformBaseCanvas = null;
     waveformCacheKey = '';
+    waveformPeaks = null;
+    waveformPeakCacheKey = '';
     $('totalTime').textContent = formatTime(playbackDuration());
     $('fileDuration').textContent = formatTime(currentDuration());
     updateProgress(state.playhead);
@@ -300,75 +306,100 @@
   function resizeWaveform() {
     if (!canvas || !state.workingData) return;
     const scroll = $('waveformScroll');
-    const logicalWidth = Math.max(scroll.clientWidth || 300, Math.round((scroll.clientWidth || 300) * state.zoom));
+    const viewportWidth = Math.max(1, scroll.clientWidth || 300);
+    const logicalWidth = Math.max(viewportWidth, Math.round(viewportWidth * state.zoom));
     const logicalHeight = Math.max(180, Math.min(260, Math.round(logicalWidth * 0.18)));
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     $('waveformStage').style.width = `${logicalWidth}px`;
-    canvas.style.width = `${logicalWidth}px`;
+    canvas.style.width = `${viewportWidth}px`;
     canvas.style.height = `${logicalHeight}px`;
-    canvas.width = Math.round(logicalWidth * dpr);
+    canvas.width = Math.round(viewportWidth * dpr);
     canvas.height = Math.round(logicalHeight * dpr);
     canvasContext.setTransform(dpr, 0, 0, dpr, 0, 0);
     waveformCacheKey = '';
     drawWaveform();
   }
 
-  function buildWaveformBase(width, height) {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    waveformBaseCanvas = document.createElement('canvas');
-    waveformBaseCanvas.width = Math.round(width * dpr);
-    waveformBaseCanvas.height = Math.round(height * dpr);
-    const context = waveformBaseCanvas.getContext('2d');
-    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  function buildWaveformPeaks(totalWidth) {
     const channels = state.workingData.channels;
     const samples = channels[0].length;
+    const bucketCount = Math.min(65536, Math.max(1, Math.ceil(totalWidth)));
+    const minimums = new Float32Array(bucketCount);
+    const maximums = new Float32Array(bucketCount);
+    minimums.fill(1);
+    maximums.fill(-1);
+    const step = samples / bucketCount;
+    for (let bucket = 0; bucket < bucketCount; bucket++) {
+      const start = Math.floor(bucket * step);
+      const end = Math.min(samples, Math.max(start + 1, Math.floor((bucket + 1) * step)));
+      const scanStep = Math.max(1, Math.floor((end - start) / 120));
+      for (let frame = start; frame < end; frame += scanStep) {
+        let sample = 0;
+        for (let channel = 0; channel < channels.length; channel++) sample += channels[channel][frame] / channels.length;
+        minimums[bucket] = Math.min(minimums[bucket], sample);
+        maximums[bucket] = Math.max(maximums[bucket], sample);
+      }
+    }
+    waveformPeaks = { minimums, maximums, bucketCount, totalWidth };
+    waveformPeakCacheKey = `${totalWidth}:${samples}:${state.workingData.sampleRate}`;
+  }
+
+  function buildWaveformBase(width, height, totalWidth, scrollLeft) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (!waveformBaseCanvas) waveformBaseCanvas = document.createElement('canvas');
+    const bitmapWidth = Math.round(width * dpr);
+    const bitmapHeight = Math.round(height * dpr);
+    if (waveformBaseCanvas.width !== bitmapWidth) waveformBaseCanvas.width = bitmapWidth;
+    if (waveformBaseCanvas.height !== bitmapHeight) waveformBaseCanvas.height = bitmapHeight;
+    const context = waveformBaseCanvas.getContext('2d');
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.clearRect(0, 0, width, height);
     const center = height / 2;
     const pixels = Math.max(1, Math.floor(width));
-    const step = samples / pixels;
-    const gradient = context.createLinearGradient(0, 0, width, 0);
+    const peakKey = `${totalWidth}:${state.workingData.channels[0].length}:${state.workingData.sampleRate}`;
+    if (!waveformPeaks || waveformPeakCacheKey !== peakKey) buildWaveformPeaks(totalWidth);
+    const gradient = context.createLinearGradient(-scrollLeft, 0, totalWidth - scrollLeft, 0);
     gradient.addColorStop(0, '#8b5cf6'); gradient.addColorStop(.5, '#22d3ee'); gradient.addColorStop(1, '#ec4899');
     context.strokeStyle = gradient;
     context.lineWidth = Math.max(1, 1.15 / Math.sqrt(state.zoom));
     context.beginPath();
     for (let x = 0; x < pixels; x++) {
-      const start = Math.floor(x * step);
-      const end = Math.min(samples, Math.max(start + 1, Math.floor((x + 1) * step)));
-      let min = 1; let max = -1;
-      const scanStep = Math.max(1, Math.floor((end - start) / 120));
-      for (let frame = start; frame < end; frame += scanStep) {
-        let sample = 0;
-        for (let channel = 0; channel < channels.length; channel++) sample += channels[channel][frame] / channels.length;
-        min = Math.min(min, sample); max = Math.max(max, sample);
-      }
+      const globalX = Core.clamp(scrollLeft + x, 0, Math.max(0, totalWidth - 1));
+      const bucket = Math.min(waveformPeaks.bucketCount - 1, Math.floor(globalX / totalWidth * waveformPeaks.bucketCount));
+      const min = waveformPeaks.minimums[bucket];
+      const max = waveformPeaks.maximums[bucket];
       context.moveTo(x + .5, center + min * center * .88);
       context.lineTo(x + .5, center + max * center * .88);
     }
     context.stroke();
-    waveformCacheKey = `${width}:${height}:${state.zoom}:${state.workingData.channels[0].length}:${state.workingData.sampleRate}`;
+    waveformCacheKey = `${width}:${height}:${totalWidth}:${Math.round(scrollLeft)}:${waveformPeakCacheKey}`;
   }
 
   function drawWaveform() {
     if (!canvasContext || !canvas) return;
     const width = parseFloat(canvas.style.width) || canvas.clientWidth;
     const height = parseFloat(canvas.style.height) || canvas.clientHeight;
+    const scroll = $('waveformScroll');
+    const totalWidth = Math.max(width, $('waveformStage').clientWidth);
+    const scrollLeft = scroll.scrollLeft;
     canvasContext.clearRect(0, 0, width, height);
     canvasContext.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--surface-waveform').trim() || 'rgba(9,10,18,.75)';
     canvasContext.fillRect(0, 0, width, height);
     if (!state.workingData) return;
+    const key = `${width}:${height}:${totalWidth}:${Math.round(scrollLeft)}:${totalWidth}:${state.workingData.channels[0].length}:${state.workingData.sampleRate}`;
+    if (!waveformBaseCanvas || waveformCacheKey !== key) buildWaveformBase(width, height, totalWidth, scrollLeft);
     const selection = Core.normalizeSelection(state.selection, currentDuration());
     if (selection) {
-      const start = Core.timeToX(selection.start, currentDuration(), width);
-      const end = Core.timeToX(selection.end, currentDuration(), width);
+      const start = Core.timeToX(selection.start, currentDuration(), totalWidth) - scrollLeft;
+      const end = Core.timeToX(selection.end, currentDuration(), totalWidth) - scrollLeft;
       canvasContext.fillStyle = 'rgba(139,92,246,.22)';
       canvasContext.fillRect(start, 0, end - start, height);
       canvasContext.strokeStyle = 'rgba(167,139,250,.9)';
       canvasContext.lineWidth = 1;
       canvasContext.strokeRect(start + .5, .5, Math.max(0, end - start - 1), height - 1);
     }
-    const key = `${width}:${height}:${state.zoom}:${state.workingData.channels[0].length}:${state.workingData.sampleRate}`;
-    if (!waveformBaseCanvas || waveformCacheKey !== key) buildWaveformBase(width, height);
     canvasContext.drawImage(waveformBaseCanvas, 0, 0, waveformBaseCanvas.width, waveformBaseCanvas.height, 0, 0, width, height);
-    const playheadX = Core.timeToX(Math.min(state.playhead, currentDuration()), currentDuration(), width);
+    const playheadX = Core.timeToX(Math.min(state.playhead, currentDuration()), currentDuration(), totalWidth) - scrollLeft;
     canvasContext.strokeStyle = '#ffffff'; canvasContext.lineWidth = 1.5;
     canvasContext.beginPath(); canvasContext.moveTo(playheadX, 0); canvasContext.lineTo(playheadX, height); canvasContext.stroke();
     canvasContext.fillStyle = '#ffffff'; canvasContext.beginPath(); canvasContext.arc(playheadX, 7, 4, 0, Math.PI * 2); canvasContext.fill();
@@ -376,7 +407,8 @@
 
   function pointerTime(event) {
     const rect = canvas.getBoundingClientRect();
-    return Core.xToTime(event.clientX - rect.left, currentDuration(), rect.width);
+    const x = $('waveformScroll').scrollLeft + event.clientX - rect.left;
+    return Core.xToTime(x, currentDuration(), $('waveformStage').clientWidth);
   }
 
   function updateSelectionUI() {
@@ -653,7 +685,7 @@
       let settled = false;
       const succeed = (buffer) => { if (!settled) { settled = true; resolve(buffer); } };
       const fail = (error) => { if (!settled) { settled = true; reject(error || new Error('The browser could not decode this audio file.')); } };
-      try { const result = context.decodeAudioData(arrayBuffer.slice(0), succeed, fail); if (result && result.then) result.then(succeed, fail); } catch (error) { fail(error); }
+      try { const result = context.decodeAudioData(arrayBuffer, succeed, fail); if (result && result.then) result.then(succeed, fail); } catch (error) { fail(error); }
     });
   }
 
@@ -696,15 +728,15 @@
     engine.primeFromGesture();
     try {
       engine.stop(); cancelAnimationFrame(state.animationFrame);
-      const bytes = await withTimeout(file.arrayBuffer(), 120000, 'Reading this file took too long.');
+      let bytes = await withTimeout(file.arrayBuffer(), 120000, 'Reading this file took too long.');
       setProcessing(true, 'Decoding audio...', 28);
       const decoded = await decodeFile(file, bytes);
+      bytes = null;
       if (!decoded || !decoded.length) throw new Error('The decoded audio is empty.');
-      const originalData = nativeToData(decoded);
-      state.originalData = Core.cloneBufferData(originalData);
-      state.workingData = Core.cloneBufferData(originalData);
-      state.originalBuffer = dataToNative(state.originalData);
-      state.workingBuffer = dataToNative(state.workingData);
+      state.originalBuffer = decoded;
+      state.originalData = nativeToData(state.originalBuffer);
+      state.workingBuffer = dataToNative(state.originalData);
+      state.workingData = nativeToData(state.workingBuffer);
       state.clipboard = null; state.selection = null; state.playhead = 0; state.zoom = 1; state.file = file;
       state.history.clear(); state.compareMode = 'modified';
       engine.setBuffers(state.originalBuffer, state.workingBuffer); engine.setCompareMode('modified'); engine.setEffectState(state.effects);
@@ -772,7 +804,7 @@
   function resetAll() {
     if (!state.originalData) return;
     engine.stop(); state.history.clear(); state.clipboard = null; state.selection = null; state.playhead = 0; state.zoom = 1; state.lastEffectKeys = [];
-    state.workingData = Core.cloneBufferData(state.originalData); state.workingBuffer = dataToNative(state.workingData);
+    state.workingBuffer = dataToNative(state.originalData); state.workingData = nativeToData(state.workingBuffer);
     engine.setWorkingBuffer(state.workingBuffer); applyEffects(defaultEffects(), 'normal', 'Normal', FACTORY_PRESETS.normal.colors);
     updateAfterBufferChange(); updateHistoryButtons(); updateSelectionUI(); showMessage('The original audio and all controls were restored.', 'success');
   }
@@ -846,7 +878,7 @@
       const filename = Core.buildExportFilename($('exportFilename').value, result.extension);
       $('exportFilename').value = filename;
       triggerDownload(result.blob, filename);
-      const renderedData = nativeToData(result.renderedBuffer); const peak = Core.getPeak(renderedData); const peakDb = Core.gainToDb(peak);
+      const peak = nativeBufferPeak(result.renderedBuffer); const peakDb = Core.gainToDb(peak);
       $('peakValue').textContent = `${peakDb.toFixed(1)} dB`; $('clipIndicator').textContent = peak >= .999 ? 'CLIPPING DETECTED' : 'Clipping: No'; $('clipIndicator').classList.toggle('active', peak >= .999);
       showMessage(`${filename} exported successfully.`, 'success', 5000);
     } catch (error) { showMessage(`Export failed: ${error.message || 'Unknown encoder error.'}`, 'error', 0); }
@@ -870,6 +902,10 @@
     $('zoomInBtn').addEventListener('click', () => updateZoom(state.zoom * 1.5)); $('zoomOutBtn').addEventListener('click', () => updateZoom(state.zoom / 1.5)); $('zoomResetBtn').addEventListener('click', () => updateZoom(1));
     $('waveLeftBtn').addEventListener('click', () => $('waveformScroll').scrollBy({ left: -$('waveformScroll').clientWidth * .7, behavior: 'smooth' }));
     $('waveRightBtn').addEventListener('click', () => $('waveformScroll').scrollBy({ left: $('waveformScroll').clientWidth * .7, behavior: 'smooth' }));
+    $('waveformScroll').addEventListener('scroll', () => {
+      cancelAnimationFrame(waveformScrollFrame);
+      waveformScrollFrame = requestAnimationFrame(() => { waveformCacheKey = ''; drawWaveform(); });
+    }, { passive: true });
     window.addEventListener('resize', () => { clearTimeout(resizeWaveform.timer); resizeWaveform.timer = setTimeout(resizeWaveform, 120); });
   }
 
@@ -966,3 +1002,4 @@
 
   document.addEventListener('DOMContentLoaded', initialize);
 })();
+

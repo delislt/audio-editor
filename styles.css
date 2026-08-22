@@ -2253,7 +2253,7 @@ input[type="range"]::-webkit-slider-track { background: transparent; }
 .compact-btn:disabled { opacity: .38; cursor: not-allowed; }
 .waveform-scroll { width: 100%; max-width: 100%; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; border: 1px solid var(--surface-border); border-radius: 18px; background: var(--surface-waveform); scrollbar-color: var(--vibe-primary) rgba(255,255,255,.04); }
 .waveform-stage { position: relative; min-width: 100%; touch-action: none; }
-#waveform { position: static; display: block; cursor: crosshair; touch-action: none; user-select: none; }
+#waveform { position: sticky; left: 0; display: block; cursor: crosshair; touch-action: none; user-select: none; }
 .selection-strip { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
 .selection-strip dl { display: flex; flex-wrap: wrap; gap: 8px; }
 .selection-strip dl div { min-width: 120px; display: grid; gap: 2px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
@@ -2817,3 +2817,4 @@ select:focus-visible,
   .control-field,
   .tempo-shortcuts button { transition: none; }
 }
+

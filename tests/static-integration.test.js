@@ -7,6 +7,7 @@ const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const script = fs.readFileSync(path.join(root, 'script.js'), 'utf8');
 const styles = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
+const editorCore = fs.readFileSync(path.join(root, 'audio-editor-core.js'), 'utf8');
 const audioEngine = fs.readFileSync(path.join(root, 'audio-engine.js'), 'utf8');
 const exportEngine = fs.readFileSync(path.join(root, 'export-engine.js'), 'utf8');
 
@@ -94,6 +95,18 @@ test('mobile layout clips decorative hero art instead of widening the page', () 
   assert.match(styles, /@media \(max-width: 600px\) \{[\s\S]*?\.hero \{ overflow: hidden; \}/);
 });
 
+test('audio storage and zoomed waveform avoid full-size duplicate allocations', () => {
+  assert.match(script, /cloneBuffers: false/);
+  assert.match(script, /buffer\.getChannelData\(index\)/);
+  assert.doesNotMatch(script, /new Float32Array\(buffer\.getChannelData\(index\)\)/);
+  assert.match(script, /state\.originalBuffer = decoded/);
+  assert.doesNotMatch(script, /decodeAudioData\(arrayBuffer\.slice/);
+  assert.match(script, /canvas\.width = Math\.round\(viewportWidth \* dpr\)/);
+  assert.match(script, /waveformScroll'\)\.addEventListener\('scroll'/);
+  assert.match(styles, /#waveform \{ position: sticky; left: 0;/);
+  assert.doesNotMatch(editorCore, /silentWindows/);
+});
+
 test('polished workspace navigation and tempo shortcuts remain connected', () => {
   ['basicPanel', 'editPanel', 'advancedPanel', 'historyPanel', 'exportPanel']
     .forEach((id) => assert.match(html, new RegExp(`id="${id}"`)));
@@ -124,3 +137,4 @@ test('pitch and export never construct layered grain players', () => {
   assert.match(audioEngine, /graph\.pitchShift\.wet\.value = pitchOptions\.wet/);
   assert.match(exportEngine, /playbackRateForState\(state, 'modified'\)/);
 });
+
